@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Faqat sinov (debug) yig'ilishida: CI ichidagi mahalliy serverga HTTP orqali ulanish uchun.
+         Mijozlarga beriladigan versiya (release) faqat HTTPS bilan ishlaydi. -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>
