@@ -1,0 +1,10 @@
+[project]
+name = "amora-backend"
+version = "0.1.0"
+description = "Amora kafe yetkazib berish xizmati: API va Telegram bot"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
