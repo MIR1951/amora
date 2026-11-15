@@ -659,3 +659,99 @@ async def test_api_uses_telegram_when_configured(bot_cfg, engine):
 async def test_dispatcher_listens_to_needed_updates(driver):
     used = driver.dispatcher.resolve_used_update_types()
     assert {"message", "callback_query", "my_chat_member"} <= set(used)
+
+
+async def test_bot_retries_instead_of_crashing_when_telegram_is_unreachable(monkeypatch):
+    import asyncio
+
+    import app.bot as bot_module
+
+    calls = []
+    pauses = []
+
+    class FlakyDispatcher:
+        def resolve_used_update_types(self):
+            return ["message"]
+
+        async def start_polling(self, bot, allowed_updates, handle_signals):
+            calls.append(handle_signals)
+            if len(calls) <= 3:
+                raise TelegramNetworkError(method=None, message="Request timeout error")
+
+    async def fake_pause(stop, seconds):
+        pauses.append(seconds)
+
+    monkeypatch.setattr(bot_module, "pause", fake_pause)
+    await bot_module.poll_forever(FlakyDispatcher(), bot=None, stop=asyncio.Event())
+    assert calls == [False] * 4  # uch marta yiqildi, to'rtinchisida ulandi
+    assert pauses == [2, 5, 10]
+
+
+async def test_bot_stops_while_waiting_to_reconnect():
+    import asyncio
+
+    import app.bot as bot_module
+
+    stop = asyncio.Event()
+    calls = []
+
+    class DeadDispatcher:
+        def resolve_used_update_types(self):
+            return []
+
+        async def start_polling(self, bot, allowed_updates, handle_signals):
+            calls.append(1)
+            stop.set()  # qayta ulanishni kutayotganda to'xtatish signali keldi
+            raise TelegramNetworkError(method=None, message="Request timeout error")
+
+    await asyncio.wait_for(bot_module.poll_forever(DeadDispatcher(), None, stop), timeout=1)
+    assert calls == [1]
+
+
+async def test_bad_token_is_not_retried_forever():
+    import asyncio
+
+    from aiogram.exceptions import TelegramUnauthorizedError
+
+    import app.bot as bot_module
+
+    class Dispatcher:
+        def resolve_used_update_types(self):
+            return []
+
+        async def start_polling(self, bot, allowed_updates, handle_signals):
+            raise TelegramUnauthorizedError(method=None, message="Unauthorized")
+
+    with pytest.raises(TelegramUnauthorizedError):
+        await bot_module.poll_forever(Dispatcher(), None, asyncio.Event())
+
+
+async def test_commands_are_set_in_background_with_retry(bot, tg, monkeypatch):
+    import app.bot as bot_module
+    from aiogram.methods import SetMyCommands
+
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        tg.fail_with = None  # ikkinchi urinishda Telegram ishlaydi
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", fake_sleep)
+    tg.fail_with = TelegramNetworkError(method=None, message="Request timeout error")
+    sleeps_before_first_try = []
+
+    async def first_sleep(seconds):
+        sleeps_before_first_try.append(seconds)
+        monkeypatch.setattr(bot_module.asyncio, "sleep", fake_sleep)
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", first_sleep)
+    await bot_module.set_commands_in_background(bot)
+    assert sleeps_before_first_try == [0] and sleeps == [30]
+    assert len(tg.of_type(SetMyCommands)) == 1
+    assert [c.command for c in tg.of_type(SetMyCommands)[0].commands] == ["start", "help", "id"]
+
+
+def test_bot_requests_time_out_quickly():
+    from app.telegram.publisher import make_bot
+
+    assert make_bot("42:TEST").session.timeout == 20

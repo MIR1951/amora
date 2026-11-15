@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
@@ -23,9 +24,14 @@ log = logging.getLogger(__name__)
 SessionFactory = async_sessionmaker[AsyncSession]
 
 
+# Telegram javob bermasa 60 emas, 20 soniyada voz kechamiz va qayta urinamiz
+REQUEST_TIMEOUT = 20
+
+
 def make_bot(token: str) -> Bot:
     return Bot(
         token,
+        session=AiohttpSession(timeout=REQUEST_TIMEOUT),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True),
     )
 

@@ -2,8 +2,11 @@
 
 import asyncio
 import logging
+import signal
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
@@ -27,14 +30,69 @@ def build_dispatcher(cfg: Settings, session_factory: SessionFactory) -> Dispatch
     return dispatcher
 
 
-async def set_commands(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Boshqaruv menyusi"),
-            BotCommand(command="help", description="Buyruqlar ro'yxati"),
-            BotCommand(command="id", description="Chat va foydalanuvchi ID"),
-        ]
-    )
+COMMANDS = [
+    BotCommand(command="start", description="Boshqaruv menyusi"),
+    BotCommand(command="help", description="Buyruqlar ro'yxati"),
+    BotCommand(command="id", description="Chat va foydalanuvchi ID"),
+]
+
+# Telegram'ga ulanib bo'lmaganda necha soniyadan keyin qayta urinish
+RETRY_DELAYS = (2, 5, 10, 20, 30)
+
+
+async def set_commands_in_background(bot: Bot) -> None:
+    """Buyruqlar ro'yxati shunchaki qulaylik: bot ishga tushishini kutdirmasligi kerak."""
+    for delay in (0, 30, 120, 600):
+        await asyncio.sleep(delay)
+        try:
+            await bot.set_my_commands(COMMANDS)
+            return
+        except Exception as error:  # noqa: BLE001
+            log.warning("Buyruqlar ro'yxati o'rnatilmadi (%s), keyinroq qayta urinamiz", error)
+
+
+async def pause(stop: asyncio.Event, seconds: float) -> None:
+    """`seconds` soniya kutadi, lekin to'xtatish so'ralsa darhol qaytadi."""
+    with suppress(TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=seconds)
+
+
+async def poll_forever(dispatcher: Dispatcher, bot: Bot, stop: asyncio.Event) -> None:
+    """Xabarlarni tinglaydi. Telegram vaqtincha javob bermasa, jarayon yiqilmaydi, qayta urinadi."""
+    attempt = 0
+    while not stop.is_set():
+        try:
+            await dispatcher.start_polling(
+                bot,
+                allowed_updates=dispatcher.resolve_used_update_types(),
+                handle_signals=False,  # to'xtatish signalini o'zimiz boshqaramiz (main ichida)
+            )
+            return
+        except (TelegramNetworkError, TelegramServerError) as error:
+            delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+            attempt += 1
+            log.warning(
+                "Telegram'ga ulanib bo'lmadi (%s). %s soniyadan keyin qayta urinamiz", error, delay
+            )
+            await pause(stop, delay)
+
+
+def install_stop_handlers(dispatcher: Dispatcher, stop: asyncio.Event) -> None:
+    """SIGTERM/SIGINT kelganda (masalan `docker compose stop`) bot toza to'xtaydi,
+    qayta ulanishni kutayotgan paytda ham."""
+
+    async def stop_polling() -> None:
+        with suppress(RuntimeError):  # polling hali boshlanmagan bo'lishi mumkin
+            await dispatcher.stop_polling()
+
+    def on_signal() -> None:
+        stop.set()
+        asyncio.ensure_future(stop_polling())
+
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        with suppress(NotImplementedError):  # Windows'da bunday imkoniyat yo'q
+            loop.add_signal_handler(signum, on_signal)
 
 
 async def main() -> None:
@@ -68,16 +126,13 @@ async def main() -> None:
     else:
         log.warning("AMORA_ORDERS_CHAT_ID yozilmagan: buyurtmalar guruhga yuborilmaydi")
 
+    stop = asyncio.Event()
+    install_stop_handlers(dispatcher, stop)
+    commands_task = asyncio.create_task(set_commands_in_background(bot))
     try:
-        try:
-            await set_commands(bot)
-        except Exception:  # noqa: BLE001
-            # Buyruqlar ro'yxati shunchaki qulaylik: usiz ham bot ishlayveradi
-            log.warning("Buyruqlar ro'yxatini o'rnatib bo'lmadi", exc_info=True)
-        await dispatcher.start_polling(
-            bot, allowed_updates=dispatcher.resolve_used_update_types()
-        )
+        await poll_forever(dispatcher, bot, stop)
     finally:
+        commands_task.cancel()
         if sweeper is not None:
             sweeper.cancel()
         await bot.session.close()
