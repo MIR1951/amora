@@ -10,10 +10,9 @@ from aiogram.methods import (
     SendMessage,
 )
 from aiogram.types import User
-from sqlalchemy import select
 
 from app.main import create_app
-from app.models import Category, Customer, Order, OrderStatus, Product, ShopSettings
+from app.models import Category, Order, OrderStatus, ShopSettings
 from app.telegram.parsing import parse_amount, parse_hours, parse_km
 from app.telegram.publisher import TelegramNotifier, publish_order, sweep_unsent
 from tests.conftest import NEAR, register
@@ -267,6 +266,12 @@ async def test_admin_menu_is_private_only(driver, seed):
 async def test_id_command_in_group(driver):
     await driver.say("/id", user_id=STRANGER_ID, chat_id=GROUP_ID)
     assert str(GROUP_ID) in driver.screen and str(STRANGER_ID) in driver.screen
+
+
+async def test_id_command_for_admin_in_private(driver, seed):
+    await driver.say("/id")
+    assert f"Sizning ID: <code>{ADMIN_ID}</code>" in driver.screen
+    assert driver.buttons == []
 
 
 async def test_admin_main_menu(driver, seed):

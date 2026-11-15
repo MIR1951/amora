@@ -8,10 +8,10 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import BaseFilter, Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, TelegramObject
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,18 +21,13 @@ from app.security import normalize_phone
 from app.services.shop import format_sum, get_shop, is_open_now
 from app.telegram import keyboards as kb
 from app.telegram import texts
+from app.telegram.filters import IsAdmin
 from app.telegram.keyboards import AdminCb
 from app.telegram.texts import escape
 from app.telegram.parsing import parse_amount, parse_hours, parse_km
 from app.telegram.publisher import SessionFactory
 
 log = logging.getLogger(__name__)
-
-
-class IsAdmin(BaseFilter):
-    async def __call__(self, event: TelegramObject, cfg: Settings) -> bool:
-        user = getattr(event, "from_user", None)
-        return user is not None and user.id in cfg.admin_id_set
 
 
 router = Router(name="admin")

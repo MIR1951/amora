@@ -21,8 +21,9 @@ def build_dispatcher(cfg: Settings, session_factory: SessionFactory) -> Dispatch
     dispatcher["cfg"] = cfg
     dispatcher["session_factory"] = session_factory
     dispatcher.include_router(orders_router.router)
-    dispatcher.include_router(admin_router.router)
+    # common admin'dan oldin turadi: aks holda adminning /id buyrug'i bosh menyuga tushib qoladi
     dispatcher.include_router(common_router.router)
+    dispatcher.include_router(admin_router.router)
     return dispatcher
 
 
