@@ -59,7 +59,8 @@ def dismiss_system_dialog(root):
     """Boshqa ilova haqidagi tizim oynasini yopadi. Yopgan bo'lsa True qaytaradi.
 
     CI emulyatori sekin ishlaganda Android "Pixel Launcher isn't responding" kabi oyna chiqaradi.
-    U Amora'ga aloqador emas, lekin ekranni to'sib qo'yadi va sinov hech narsani ko'ra olmaydi.
+    U Amora'ga aloqador emas, lekin ekranni to'sib qo'yadi: sinov hech narsani ko'ra olmaydi,
+    bosish va yozish ham ilovaga emas, shu oynaga ketadi.
     Oyna Amora'ning o'zi haqida bo'lsa, bu haqiqiy xato: sinov shu yerda to'xtaydi.
     """
     items = list(nodes(root))
@@ -71,9 +72,11 @@ def dismiss_system_dialog(root):
         return False
     if "Amora" in title:
         raise RuntimeError(f"Ilova ishlamay qoldi: {title}")
-    button = next((node for node in items if node["text"] == "Wait"), None)
+    # "Wait" bosilsa, oyna bir necha soniyadan keyin yana chiqadi. "Close app" o'sha ilovani
+    # (Amora'ni emas) yopadi, tizim uni orqa fonda o'zi qayta ishga tushiradi.
+    button = next((node for node in items if node["text"] == "Close app"), None)
     if button is None:
-        button = next((node for node in items if node["text"] == "Close app"), None)
+        button = next((node for node in items if node["text"] == "Wait"), None)
     if button is None:
         raise RuntimeError(f"Tizim oynasini yopib bo'lmadi: {title}")
     print(f"[ogohlantirish] tizim oynasi yopildi: {title}", flush=True)
@@ -148,12 +151,34 @@ def type_text(text):
     time.sleep(1)
 
 
+def fill_field(index, text):
+    """Maydonni bosib, matn yozadi va yozilganini tekshiradi.
+
+    Yozish paytida tizim oynasi chiqib qolsa, harflar ilovaga yetib bormaydi: bunday holda
+    maydon tozalanib, qayta yoziladi.
+    """
+    wanted = text.replace(" ", "")
+    for _ in range(4):
+        tap_field(index)
+        type_text(text)
+        fields = [node for node in nodes(dump()) if node["class"].endswith("EditText")]
+        if index < len(fields) and wanted in fields[index]["text"].replace(" ", ""):
+            return
+        tap_field(index)
+        adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+        adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * 40))
+        time.sleep(1)
+    raise RuntimeError(f"{index}-maydonga yozib bo'lmadi: {text!r}")
+
+
 def shot(name):
+    dump()  # ekranni tizim oynasi to'sib turgan bo'lsa, avval u yopiladi
     (OUT / f"{name}.png").write_bytes(adb("exec-out", "screencap", "-p"))
     print(f"[rasm] {name}.png", flush=True)
 
 
 def back():
+    dump()
     adb("shell", "input", "keyevent", "BACK")
     time.sleep(2)
 
@@ -230,10 +255,8 @@ def fill_cart():
     tap("Ism va telefonni kiriting")
 
     wait_for("Saqlash")
-    tap_field(0)
-    type_text("Sinov")
-    tap_field(1)
-    type_text("901234567")
+    fill_field(0, "Sinov")
+    fill_field(1, "901234567")
     shot("07-profile")
     tap("Saqlash")
 
@@ -399,6 +422,24 @@ def customer_location(server):
     return DEFAULT_LOCATION
 
 
+def save_diagnostics():
+    """Emulyator holati: "javob bermayapti" (ANR) yozuvlari, protsessor yuklamasi, chizilgan kadrlar.
+
+    Tizim oynasi chiqqan bo'lsa, sababi shu yerdan ko'rinadi: emulyator shunchaki sekinmi yoki
+    ilova protsessorni band qilib qo'yganmi.
+    """
+    parts = []
+    log = adb("logcat", "-d", "ActivityManager:E", "*:S", check=False).decode(errors="replace")
+    anr = [line for line in log.splitlines() if "ANR in" in line or "Reason:" in line or "CPU usage" in line
+           or "% TOTAL" in line or "uz.amora" in line or "nexuslauncher" in line]
+    parts.append("== ANR yozuvlari ==\n" + "\n".join(anr[-80:]))
+    cpu = adb("shell", "dumpsys", "cpuinfo", check=False).decode(errors="replace")
+    parts.append("== Protsessor ==\n" + "\n".join(cpu.splitlines()[:25]))
+    gfx = adb("shell", "dumpsys", "gfxinfo", PACKAGE, check=False).decode(errors="replace")
+    parts.append("== Kadrlar ==\n" + "\n".join(gfx.splitlines()[:30]))
+    (OUT / "diagnostics.txt").write_text("\n\n".join(parts), encoding="utf-8")
+
+
 def main():
     global OUT
     if len(sys.argv) != 4 or sys.argv[1] not in ("readonly", "full"):
@@ -431,6 +472,11 @@ def main():
         (OUT / "logcat.txt").write_bytes(log)
         print(log.decode(errors="replace")[-6000:], flush=True)
         return 1
+    finally:
+        try:
+            save_diagnostics()
+        except Exception as error:
+            print(f"[ogohlantirish] tashxisni saqlab bo'lmadi: {error}", flush=True)
     print(f"Sinov muvaffaqiyatli o'tdi ({mode})", flush=True)
     return 0
 
