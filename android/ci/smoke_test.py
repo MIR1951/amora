@@ -12,16 +12,22 @@ full      CI ichida ishlayotgan SINOV serveriga qaratilgan APK uchun. Buyurtma b
           berish ham tekshiriladi. Haqiqiy serverga qaratilgan APK bilan ISHLATILMAYDI.
 """
 
+import json
 import re
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PACKAGE = "uz.amora.app"
 # backend_ctl.py sinov serverida kafe nomini shunga o'zgartiradi (TEST_CAFE_NAME)
 TEST_CAFE_NAME = "Amora sinov serveri"
+# Sinov serveri CI ichida shu manzilda ishlaydi (emulyator uni 10.0.2.2 orqali ko'radi)
+TEST_SERVER = "http://127.0.0.1:8000"
+# Kafe joylashuvi serverda kiritilmagan bo'lsa, emulyator shu yerga qo'yiladi: Samarqand markazi
+DEFAULT_LOCATION = (39.6547, 66.9758)
 BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 OUT = Path(".")
 
@@ -366,6 +372,33 @@ def scenario_full():
     time.sleep(3)
 
 
+def live_server():
+    """Haqiqiy server manzili: ilova yig'ilganda ishlatilgan android/gradle.properties dan."""
+    properties = Path(__file__).resolve().parents[1] / "gradle.properties"
+    for line in properties.read_text(encoding="utf-8").splitlines():
+        if line.startswith("amora.apiBaseUrl="):
+            return line.split("=", 1)[1].strip().rstrip("/")
+    raise RuntimeError("gradle.properties da amora.apiBaseUrl topilmadi")
+
+
+def customer_location(server):
+    """Emulyator turadigan joy: kafedan 150 metrcha narida, ya'ni yetkazish hududi ichida.
+
+    Kafe joylashuvi serverdan o'qiladi (faqat o'qish so'rovi). Kafe o'z manzilini va yetkazish
+    hududini o'zgartirsa ham, sinovdagi "mijoz" hudud ichida qoladi.
+    """
+    try:
+        with urllib.request.urlopen(f"{server}/api/v1/shop", timeout=20) as response:
+            shop = json.load(response)
+        latitude, longitude = shop.get("cafe_latitude"), shop.get("cafe_longitude")
+        if latitude is not None and longitude is not None:
+            return float(latitude) + 0.0015, float(longitude)
+        print("[ogohlantirish] serverda kafe joylashuvi kiritilmagan", flush=True)
+    except Exception as error:
+        print(f"[ogohlantirish] kafe joylashuvini o'qib bo'lmadi: {error}", flush=True)
+    return DEFAULT_LOCATION
+
+
 def main():
     global OUT
     if len(sys.argv) != 4 or sys.argv[1] not in ("readonly", "full"):
@@ -377,7 +410,8 @@ def main():
     adb("install", "-r", apk)
     for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"):
         adb("shell", "pm", "grant", PACKAGE, f"android.permission.{permission}")
-    adb("emu", "geo", "fix", "66.9758", "39.6547", check=False)  # Samarqand markazi
+    latitude, longitude = customer_location(TEST_SERVER if mode == "full" else live_server())
+    adb("emu", "geo", "fix", f"{longitude:.5f}", f"{latitude:.5f}", check=False)  # avval uzunlik, keyin kenglik
     adb("logcat", "-c", check=False)
     adb("shell", "am", "start", "-W", "-n", f"{PACKAGE}/.MainActivity")
 
