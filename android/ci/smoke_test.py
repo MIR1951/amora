@@ -58,6 +58,7 @@ def nodes(root):
             "text": node.get("text") or "",
             "desc": node.get("content-desc") or "",
             "class": node.get("class") or "",
+            "id": node.get("resource-id") or "",
             "x": (x1 + x2) // 2,
             "y": (y1 + y2) // 2,
         }
@@ -88,6 +89,14 @@ def tap_node(node):
 
 def tap(needle, timeout=45, exclude=()):
     tap_node(wait_for(needle, timeout, exclude))
+
+
+def find_id(resource_id):
+    """Ilova kodidagi testTag bo'yicha izlaydi (masalan, taom nomi: "product-name")."""
+    for node in nodes(dump()):
+        if node["id"] == resource_id or node["id"].endswith("/" + resource_id):
+            return node
+    return None
 
 
 def tap_field(index):
@@ -152,9 +161,12 @@ def fill_cart():
     shot("01-menu")
     print("Menyu:", visible_texts(), flush=True)
 
-    # Taom haqida ma'lumot oynasi (ochilmasa, sinov davom etaveradi)
+    # Taom haqida ma'lumot oynasi: taom nomi bosilganda ochiladi (ochilmasa, sinov davom etaveradi)
     try:
-        tap("so'm", exclude=("Yetkazish", "buyurtma", "Savat"))
+        name = find_id("product-name")
+        if name is None:
+            raise RuntimeError("taom kartochkasi topilmadi")
+        tap_node(name)
         wait_for("Savatga qo'shish", timeout=15)
         shot("02-product")
         back()
@@ -195,13 +207,29 @@ def fill_cart():
     print("Savat:", visible_texts(), flush=True)
 
 
+def open_tab(label):
+    """Pastki menyudagi bo'limga o'tadi: "Menyu", "Buyurtmalar" yoki "Profil"."""
+    matches = [node for node in nodes(dump()) if node["text"] == label]
+    if not matches:
+        raise RuntimeError(f"Pastki menyuda topilmadi: {label!r}")
+    # Shu so'z ekranning boshqa joyida ham bo'lishi mumkin: pastki menyu hammasidan pastda turadi
+    tap_node(max(matches, key=lambda node: node["y"]))
+
+
+def shot_profile(name):
+    open_tab("Profil")
+    wait_for("Shaxsiy ma'lumotlar")
+    shot(name)
+
+
 def scenario_readonly():
     fill_cart()
     # "Buyurtma berish" tugmasi ATAYLAB bosilmaydi: haqiqiy kafega buyurtma ketmasin.
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Hali buyurtma yo'q")
     shot("09-orders")
+    shot_profile("10-profile")
 
 
 def place_order():
@@ -257,7 +285,7 @@ def scenario_full():
 
     # Buyurtmalar tarixi va undan buyurtmani ochish
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Buyurtma №")
     wait_for("Yetkazildi")
     shot("14-orders")
@@ -286,12 +314,26 @@ def scenario_full():
     shot("18-order-rejected")
 
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Rad etildi")
     wait_for("Bekor qilindi")
     wait_for("Yetkazildi")
     shot("19-orders-all")
     print("Buyurtmalar:", visible_texts(), flush=True)
+
+    shot_profile("20-profile")
+
+    # Tungi rejim: ranglar qorong'i mavzuda ham to'g'ri ko'rinishini rasmga olamiz
+    open_tab("Menyu")
+    adb("shell", "cmd", "uimode", "night", "yes")
+    time.sleep(4)
+    wait_for(TEST_CAFE_NAME)
+    shot("21-menu-dark")
+    open_tab("Buyurtmalar")
+    wait_for("Rad etildi")
+    shot("22-orders-dark")
+    adb("shell", "cmd", "uimode", "night", "no")
+    time.sleep(3)
 
 
 def main():

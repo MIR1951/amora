@@ -3,4 +3,9 @@
     <style name="Theme.Amora" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
+
+    <!-- Ilova ochilayotganda ko'rinadi, MainActivity ishga tushgach Theme.Amora bilan almashtiriladi -->
+    <style name="Theme.Amora.Launch">
+        <item name="android:windowBackground">@drawable/splash</item>
+    </style>
 </resources>

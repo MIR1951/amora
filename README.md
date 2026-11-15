@@ -121,7 +121,9 @@ TEST_DATABASE_URL=postgresql+asyncpg://user:parol@localhost:5432/amora_test pyte
 
 `android/` papkasida. Kotlin va Jetpack Compose'da yozilgan, Android 7.0 va undan yuqorisida ishlaydi.
 
-Ekranlar: menyu (bo'limlar, taom oynasi, savat tugmasi), savat (summa serverda hisoblanadi), xaritadan manzil tanlash, profil (ism va telefon), buyurtma holati, buyurtmalar tarixi.
+Ekranlar: menyu (manzil satri, kafe kartochkasi, qidiruv, bo'limlar, taom oynasi, savat tugmasi), savat (summa serverda hisoblanadi), xaritadan manzil tanlash, buyurtma holati, buyurtmalar tarixi, profil (ism va telefon). Menyu, buyurtmalar va profil pastki menyu orqali ochiladi.
+
+Dizayn asosi `android/app/src/main/java/uz/amora/app/ui/theme/Theme.kt` da (ranglar, shrift, burchaklar), umumiy tugma va kartochkalar `ui/components/Components.kt` da. Kafe o'z logotipi va ranglarini bersa, asosan shu ikki fayl o'zgaradi. Shrift: Manrope (ochiq litsenziya, `android/licenses/Manrope-OFL.txt`).
 
 Qanday ishlaydi:
 

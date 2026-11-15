@@ -14,18 +14,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -39,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -62,13 +67,19 @@ import uz.amora.app.data.Order
 import uz.amora.app.data.OrderStatus
 import uz.amora.app.ui.components.BackTopBar
 import uz.amora.app.ui.components.BigButton
+import uz.amora.app.ui.components.BottomActionBar
+import uz.amora.app.ui.components.IconBadge
 import uz.amora.app.ui.components.LoadingBox
 import uz.amora.app.ui.components.MessageBox
+import uz.amora.app.ui.components.OrderProgressBar
+import uz.amora.app.ui.components.OrderStatusIcon
 import uz.amora.app.ui.components.SectionCard
+import uz.amora.app.ui.components.SoftButton
 import uz.amora.app.ui.components.SummaryRow
+import uz.amora.app.ui.components.statusContainerColor
+import uz.amora.app.ui.components.statusContentColor
 import uz.amora.app.ui.profile.dialPhone
-import uz.amora.app.ui.theme.onSuccessContainer
-import uz.amora.app.ui.theme.successContainer
+import uz.amora.app.ui.theme.success
 import uz.amora.app.util.formatDateTime
 import uz.amora.app.util.formatPhone
 import uz.amora.app.util.formatSum
@@ -165,6 +176,7 @@ fun OrderScreen(
     val state = vm.state.collectAsStateWithLifecycle().value
     val shop = container.catalog.state.collectAsStateWithLifecycle().value.shop
     val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
     val snackbar = remember { SnackbarHostState() }
     var confirmCancel by rememberSaveable { mutableStateOf(false) }
 
@@ -192,9 +204,22 @@ fun OrderScreen(
     val order = state.order
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = scheme.background,
         topBar = { BackTopBar(title = "Buyurtma №$orderId", onBack = onBack) },
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            // Tugagan buyurtmani bir bosishda takrorlash mumkin
+            if (order != null && !order.isActive) {
+                BottomActionBar {
+                    BigButton(
+                        text = "Yana shunday buyurtma berish",
+                        onClick = {
+                            if (vm.repeatOrder() > 0) onOpenCart()
+                        },
+                    )
+                }
+            }
+        },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = state.refreshing,
@@ -207,7 +232,7 @@ fun OrderScreen(
                 order == null && state.loading -> LoadingBox()
 
                 order == null -> MessageBox(
-                    emoji = "📡",
+                    icon = Icons.Default.Refresh,
                     title = "Buyurtma yuklanmadi",
                     text = state.error,
                     actionLabel = "Qayta urinish",
@@ -218,42 +243,32 @@ fun OrderScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
+                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     StatusCard(order)
 
                     if (order.canCancel) {
-                        OutlinedButton(
+                        SoftButton(
+                            text = if (state.cancelling) "Bekor qilinmoqda…" else "Buyurtmani bekor qilish",
                             onClick = { confirmCancel = true },
+                            icon = Icons.Default.Close,
                             enabled = !state.cancelling,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (state.cancelling) "Bekor qilinmoqda…" else "Buyurtmani bekor qilish")
-                        }
+                            danger = true,
+                        )
                     }
 
                     val cafePhone = shop?.phone
                     if (order.isActive && !cafePhone.isNullOrBlank()) {
-                        OutlinedButton(
+                        SoftButton(
+                            text = "Kafega qo'ng'iroq qilish: ${formatPhone(cafePhone)}",
                             onClick = { dialPhone(context, cafePhone) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Kafega qo'ng'iroq qilish: ${formatPhone(cafePhone)}")
-                        }
+                            icon = Icons.Default.Phone,
+                        )
                     }
 
                     ItemsCard(order)
                     DetailsCard(order)
-
-                    if (!order.isActive) {
-                        BigButton(
-                            text = "Yana shunday buyurtma berish",
-                            onClick = {
-                                if (vm.repeatOrder() > 0) onOpenCart()
-                            },
-                        )
-                    }
                 }
             }
         }
@@ -262,18 +277,35 @@ fun OrderScreen(
     if (confirmCancel) {
         AlertDialog(
             onDismissRequest = { confirmCancel = false },
-            title = { Text("Buyurtmani bekor qilasizmi?") },
-            text = { Text("Kafe buyurtmani hali qabul qilmagan. Bekor qilsangiz, u kafega yuborilmaydi.") },
+            containerColor = scheme.surface,
+            title = { Text("Buyurtmani bekor qilasizmi?", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Text(
+                    text = "Kafe buyurtmani hali qabul qilmagan. Bekor qilsangiz, u kafega yuborilmaydi.",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         confirmCancel = false
                         vm.cancel()
                     },
-                ) { Text("Bekor qilish") }
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = scheme.error,
+                        contentColor = scheme.onError,
+                    ),
+                ) { Text("Bekor qilish", style = MaterialTheme.typography.labelLarge) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmCancel = false }) { Text("Yo'q, qolsin") }
+                TextButton(onClick = { confirmCancel = false }) {
+                    Text(
+                        text = "Yo'q, qolsin",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             },
         )
     }
@@ -303,80 +335,97 @@ private val STEPS = listOf(
     OrderStatus.DELIVERED to "Yetkazildi",
 )
 
+/** Buyurtma holati: katta belgi, sarlavha, izoh va bosqichlar. */
 @Composable
 private fun StatusCard(order: Order) {
     val scheme = MaterialTheme.colorScheme
     val stopped = order.status == OrderStatus.REJECTED || order.status == OrderStatus.CANCELLED
-    val container = when {
-        order.status == OrderStatus.REJECTED -> scheme.errorContainer
-        order.status == OrderStatus.CANCELLED -> scheme.surfaceVariant
-        order.status == OrderStatus.DELIVERED -> scheme.successContainer
-        else -> scheme.surface
+    val accent = when (order.status) {
+        OrderStatus.DELIVERED -> scheme.success
+        else -> scheme.primary
     }
-    val content = when {
-        order.status == OrderStatus.REJECTED -> scheme.onErrorContainer
-        order.status == OrderStatus.CANCELLED -> scheme.onSurfaceVariant
-        order.status == OrderStatus.DELIVERED -> scheme.onSuccessContainer
-        else -> scheme.onSurface
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = container,
-        contentColor = content,
-        shadowElevation = if (container == scheme.surface) 1.dp else 0.dp,
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(order.statusLabel, style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(4.dp))
-            Text(statusDescription(order), style = MaterialTheme.typography.bodyMedium)
+    SectionCard(padding = 18.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(size = 60.dp, container = statusContainerColor(order.status)) {
+                OrderStatusIcon(
+                    status = order.status,
+                    modifier = Modifier.size(30.dp),
+                    tint = statusContentColor(order.status),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(order.statusLabel, style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = statusDescription(order),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+        }
 
-            if (!stopped) {
-                Spacer(Modifier.height(16.dp))
-                val currentIndex = STEPS.indexOfFirst { it.first == order.status }
-                STEPS.forEachIndexed { index, step ->
-                    val done = index <= currentIndex
-                    val time = order.history.lastOrNull { it.status == step.first }?.createdAt
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(if (done) scheme.primary else scheme.outlineVariant),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (done) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = scheme.onPrimary,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
+        if (!stopped) {
+            Spacer(Modifier.height(18.dp))
+            OrderProgressBar(status = order.status, color = accent)
+            Spacer(Modifier.height(18.dp))
+
+            val currentIndex = STEPS.indexOfFirst { it.first == order.status }
+            STEPS.forEachIndexed { index, step ->
+                val done = index <= currentIndex
+                val time = order.history.lastOrNull { it.status == step.first }?.createdAt
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(if (done) accent else scheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (done) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(scheme.outline),
+                            )
                         }
-                        Spacer(Modifier.width(12.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = step.second,
+                        style = if (index == currentIndex) {
+                            MaterialTheme.typography.titleSmall
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
+                        color = if (done) scheme.onSurface else scheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (done && time != null) {
                         Text(
-                            text = step.second,
-                            style = if (index == currentIndex) {
-                                MaterialTheme.typography.titleSmall
-                            } else {
-                                MaterialTheme.typography.bodyMedium
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (done && time != null) {
-                            Text(formatTime(time), style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                    if (index < STEPS.lastIndex) {
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .width(2.dp)
-                                .height(16.dp)
-                                .background(if (index < currentIndex) scheme.primary else scheme.outlineVariant),
+                            text = formatTime(time),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.onSurfaceVariant,
                         )
                     }
+                }
+                if (index < STEPS.lastIndex) {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 11.dp, top = 3.dp, bottom = 3.dp)
+                            .width(2.dp)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (index < currentIndex) accent else scheme.outlineVariant),
+                    )
                 }
             }
         }
@@ -385,35 +434,58 @@ private fun StatusCard(order: Order) {
 
 @Composable
 private fun ItemsCard(order: Order) {
+    val scheme = MaterialTheme.colorScheme
     SectionCard {
+        Text("Buyurtma tarkibi", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(10.dp))
         for (item in order.items) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "${item.quantity} × ${item.name}",
+                    text = "${item.quantity} ×",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(scheme.surfaceVariant)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = item.name,
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(12.dp))
-                Text(formatSum(item.lineTotal), style = MaterialTheme.typography.bodyLarge)
+                Text(formatSum(item.lineTotal), style = MaterialTheme.typography.titleSmall, maxLines = 1)
             }
         }
         HorizontalDivider(
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.padding(vertical = 10.dp),
+            color = scheme.outlineVariant,
         )
         SummaryRow("Taomlar", formatSum(order.itemsTotal))
-        SummaryRow("Yetkazish", if (order.deliveryFee == 0) "Bepul" else formatSum(order.deliveryFee))
+        SummaryRow(
+            label = "Yetkazish",
+            value = if (order.deliveryFee == 0) "Bepul" else formatSum(order.deliveryFee),
+            valueColor = if (order.deliveryFee == 0) scheme.success else scheme.onSurface,
+        )
         SummaryRow("Jami", formatSum(order.total), strong = true)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             text = "To'lov: kuryerga naqd pul bilan",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(scheme.surfaceVariant)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
 }
@@ -421,6 +493,8 @@ private fun ItemsCard(order: Order) {
 @Composable
 private fun DetailsCard(order: Order) {
     SectionCard {
+        Text("Yetkazish ma'lumotlari", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
         DetailRow("Berilgan vaqti", formatDateTime(order.createdAt))
         DetailRow("Manzil", order.addressNote.ifBlank { "Xaritada belgilangan joy" })
         DetailRow("Qabul qiluvchi", "${order.customerName}, ${formatPhone(order.phone)}")
@@ -430,7 +504,7 @@ private fun DetailsCard(order: Order) {
 
 @Composable
 private fun DetailRow(label: String, value: String) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+    Column(modifier = Modifier.padding(vertical = 5.dp)) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
