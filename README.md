@@ -5,7 +5,7 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 | Qism | Texnologiya | Holati |
 |---|---|---|
 | `backend/` server (API) | Python, FastAPI, PostgreSQL | tayyor |
-| Telegram bot (buyurtmalar guruhi va admin bo'limi) | Python, aiogram | keyingi bosqich |
+| Telegram bot (buyurtmalar guruhi va admin bo'limi) | Python, aiogram | tayyor |
 | Android ilova | Kotlin | rejada |
 | iOS ilova | Swift | Android'dan keyin |
 
@@ -17,6 +17,36 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 - **Holatlar.** `new` (kafe javobi kutilmoqda) → `accepted` (tayyorlanmoqda) → `delivering` (kuryer yo'lda) → `delivered`. Kafe istalgan bosqichda rad etishi mumkin (`rejected`), mijoz faqat kafe qabul qilguncha bekor qila oladi (`cancelled`).
 - **Yetkazish narxi.** Belgilangan narx, ixtiyoriy "falon summadan bepul" chegarasi va ixtiyoriy masofa chegarasi (kafedan necha km gacha).
 - **Soxta buyurtmalardan himoya.** Bitta mijozda bir vaqtda ko'pi bilan 2 ta tugallanmagan buyurtma, raqamni bloklash, ro'yxatdan o'tishga cheklov.
+
+## Telegram bot
+
+**Buyurtmalar guruhi.** Har bir yangi buyurtma guruhga bitta xabar bo'lib keladi: taomlar, summa, mijoz ismi va raqami, manzil. Xabar ostida tugmalar bor:
+
+- `✅ Qabul qilish` → `🚗 Yo'lga chiqdi` → `✅ Yetkazildi`
+- `❌ Rad etish`: avval sababini so'raydi, shuning uchun tasodifan bosib yuborilmaydi
+- `📍 Google xarita` va `📍 Yandex xarita`: kuryer manzilni xaritada ochadi
+
+Har bir bosishda xabar yangilanadi va kim, qachon bosgani yozib qo'yiladi. Mijozning ilovasida holat shu zahoti o'zgaradi. Mijoz buyurtmani bekor qilsa, guruhga alohida xabar keladi.
+
+Telegram vaqtincha ishlamay qolsa ham buyurtma yo'qolmaydi: bot har 20 soniyada guruhga yetib bormagan buyurtmalarni qayta yuboradi.
+
+**Admin bo'limi.** Adminlar botga shaxsiy yozishmada `/start` yozadi:
+
+- **Menyu:** taom qo'shish, nomi, narxi, tavsifi, rasmi va kategoriyasini o'zgartirish, "tugadi" deb belgilash, o'chirish.
+- **Kategoriyalar:** qo'shish, nomini o'zgartirish, o'chirish.
+- **Sozlamalar:** yetkazish narxi, bepul yetkazish chegarasi, eng kam buyurtma, yetkazish masofasi, ish vaqti, kafe telefoni va joylashuvi.
+- **Bugungi hisobot:** nechta buyurtma, qanchasi yetkazildi va qancha summaga.
+- **Buyurtma qabul qilishni to'xtatish/yoqish:** kafe band bo'lganda bitta tugma.
+- `/blok 901234567` va `/ochish 901234567`: soxta buyurtma bergan raqamni bloklash.
+
+### Botni sozlash
+
+1. Telegram'da [@BotFather](https://t.me/BotFather)'ga `/newbot` yozing, bot oching va bergan tokenini `.env` fayldagi `AMORA_BOT_TOKEN` ga yozing.
+2. Botga shaxsiy yozishmada `/start` yozing. U sizning ID raqamingizni aytadi. Shu raqamni `AMORA_ADMIN_IDS` ga yozing (bir nechta admin bo'lsa vergul bilan).
+3. Xodimlar uchun guruh oching va botni qo'shing. Bot guruh ID'sini o'zi yozib beradi. Uni `AMORA_ORDERS_CHAT_ID` ga yozing.
+4. `docker compose up -d` bilan qayta ishga tushiring.
+
+Token maxfiy: uni hech kimga yubormang va GitHub'ga yuklamang. Guruhdagi har bir a'zo buyurtma tugmalarini bosa oladi, shuning uchun guruhga faqat xodimlarni qo'shing.
 
 ## API
 
@@ -96,7 +126,9 @@ backend/
     services/     buyurtma qoidalari (API ham, bot ham shundan foydalanadi)
     models.py     baza jadvallari
     schemas.py    so'rov va javob ko'rinishi
-    notifier.py   yangi buyurtma haqida xabar berish (bot shu yerga ulanadi)
+    telegram/     bot: buyurtma xabari, tugmalar, admin bo'limi
+    bot.py        botni ishga tushirish (python -m app.bot)
+    notifier.py   yangi buyurtma haqida xabar berish
   migrations/     baza sxemasi o'zgarishlari
   tests/
 docker-compose.yml

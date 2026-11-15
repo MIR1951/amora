@@ -28,10 +28,27 @@ def create_app(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     db_engine = engine or make_engine(cfg.database_url)
+    session_factory = make_session_factory(db_engine)
+
+    telegram_notifier = None
+    if notifier is None:
+        if cfg.bot_token and cfg.orders_chat_id is not None:
+            from app.telegram.publisher import TelegramNotifier
+
+            telegram_notifier = TelegramNotifier.from_settings(cfg, session_factory)
+            notifier = telegram_notifier
+        else:
+            logging.getLogger(__name__).warning(
+                "Telegram sozlanmagan (AMORA_BOT_TOKEN, AMORA_ORDERS_CHAT_ID): "
+                "buyurtmalar guruhga yuborilmaydi"
+            )
+            notifier = NullNotifier()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        if telegram_notifier is not None:
+            await telegram_notifier.close()
         if engine is None:  # o'zimiz yaratgan bo'lsak, o'zimiz yopamiz
             await db_engine.dispose()
 
@@ -43,8 +60,8 @@ def create_app(
     )
     app.state.settings = cfg
     app.state.engine = db_engine
-    app.state.session_factory = make_session_factory(db_engine)
-    app.state.notifier = notifier or NullNotifier()
+    app.state.session_factory = session_factory
+    app.state.notifier = notifier
     app.state.register_limiter = RateLimiter(cfg.register_limit_per_hour)
 
     install_error_handlers(app)

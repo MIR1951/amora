@@ -31,6 +31,21 @@ services:
       # Faqat serverning o'zidan ochiq: tashqariga nginx orqali HTTPS bilan chiqariladi
       - "127.0.0.1:8000:8000"
 
+  bot:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started  # baza jadvallarini api yaratadi
+    env_file: .env
+    environment:
+      AMORA_DATABASE_URL: postgresql+asyncpg://amora:${POSTGRES_PASSWORD}@db:5432/amora
+      AMORA_MEDIA_DIR: /srv/amora/media
+    volumes:
+      # Bot saqlagan taom rasmlarini api shu yerdan tarqatadi
+      - media:/srv/amora/media
+    command: ["python", "-m", "app.bot"]
+
 volumes:
   pgdata:
   media:
