@@ -6,7 +6,7 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 |---|---|---|
 | `backend/` server (API) | Python, FastAPI, PostgreSQL | tayyor |
 | Telegram bot (buyurtmalar guruhi va admin bo'limi) | Python, aiogram | tayyor |
-| Android ilova | Kotlin | rejada |
+| `android/` Android ilova | Kotlin, Jetpack Compose | sinovda |
 | iOS ilova | Swift | Android'dan keyin |
 
 ## Server qanday ishlaydi
@@ -117,6 +117,35 @@ Testlarni haqiqiy PostgreSQL'da yurgizish:
 TEST_DATABASE_URL=postgresql+asyncpg://user:parol@localhost:5432/amora_test pytest
 ```
 
+## Android ilova
+
+`android/` papkasida. Kotlin va Jetpack Compose'da yozilgan, Android 7.0 va undan yuqorisida ishlaydi.
+
+Ekranlar: menyu (bo'limlar, taom oynasi, savat tugmasi), savat (summa serverda hisoblanadi), xaritadan manzil tanlash, profil (ism va telefon), buyurtma holati, buyurtmalar tarixi.
+
+Qanday ishlaydi:
+
+- Mijoz menyuni ro'yxatdan o'tmasdan ko'radi. Birinchi buyurtma paytida ism va telefon so'raladi, server bergan kalit telefonda saqlanadi.
+- Xarita OpenStreetMap: kalit ham, to'lov ham kerak emas. Joylashuv Google xizmatlarisiz, telefonning o'z GPS'i orqali aniqlanadi.
+- Buyurtma ochiq turganda uning holati har 7 soniyada serverdan so'raladi. Ilova yopiq paytda bildirishnoma (push) hozircha yo'q.
+- Har bir buyurtmaga takrorlanmas raqam biriktiriladi: internet uzilib, buyurtma qayta yuborilsa ham u ikkilanmaydi.
+
+Server manzili bitta joyda turadi: `android/gradle.properties` dagi `amora.apiBaseUrl`. Domen o'zgarsa faqat shu qator almashtiriladi.
+
+### APK yig'ish
+
+APK GitHub Actions'da yig'iladi (`.github/workflows/android.yml`): testlar o'tadi, APK tayyorlanadi, so'ng ilova emulyatorda ochilib, asosiy ekranlar rasmga olinadi (`android/ci/smoke_test.py`). Bu sinov haqiqiy serverga faqat o'qish so'rovlarini yuboradi, buyurtma bermaydi. Tayyor APK va rasmlar har bir ishga tushirishning "Artifacts" bo'limida turadi.
+
+Kompyuterda yig'ish uchun Android SDK va JDK 17 kerak:
+
+```bash
+cd android
+./gradlew testReleaseUnitTest assembleRelease
+# natija: app/build/outputs/apk/release/app-release.apk
+```
+
+APK `android/keystore/amora-test.jks` sinov kaliti bilan imzolanadi. Bu kalit repoda ochiq turadi va faqat sinov uchun. Do'konga (Google Play) chiqariladigan versiya alohida, maxfiy kalit bilan imzolanadi.
+
 ## Papkalar
 
 ```
@@ -131,5 +160,12 @@ backend/
     notifier.py   yangi buyurtma haqida xabar berish
   migrations/     baza sxemasi o'zgarishlari
   tests/
+android/
+  app/src/main/java/uz/amora/app/
+    data/         server bilan aloqa, savat, telefonda saqlanadigan ma'lumotlar
+    ui/           ekranlar (menu, cart, address, profile, order, orders)
+    util/         summa, telefon va vaqtni ko'rsatish
+  ci/             emulyatordagi sinov
+  gradle.properties   server manzili va ilova versiyasi
 docker-compose.yml
 ```
