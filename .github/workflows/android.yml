@@ -85,7 +85,7 @@ jobs:
       # Faqat shu ishning ichidagi sinov bazasi va serveri (emulyator uchun 10.0.2.2 = shu mashina)
       AMORA_DATABASE_URL: postgresql+asyncpg://amora:amora@localhost:5432/amora
       AMORA_PUBLIC_BASE_URL: http://10.0.2.2:8000
-      AMORA_MEDIA_DIR: ${{ runner.temp }}/amora-media
+      AMORA_MEDIA_DIR: /tmp/amora-media
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
