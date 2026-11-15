@@ -44,7 +44,13 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     if not cfg.bot_token:
-        raise SystemExit("AMORA_BOT_TOKEN yozilmagan. Tokenni @BotFather'dan oling.")
+        # Xato bilan chiqsak, Docker botni to'xtovsiz qayta ishga tushiraveradi.
+        # Shuning uchun token yozilguncha jim kutib turamiz.
+        log.warning(
+            "AMORA_BOT_TOKEN yozilmagan: bot ishlamayapti. Tokenni @BotFather'dan olib "
+            ".env fayliga yozing va `docker compose up -d` ni qayta ishga tushiring."
+        )
+        await asyncio.Event().wait()
 
     engine = make_engine(cfg.database_url)
     session_factory = make_session_factory(engine)
