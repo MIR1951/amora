@@ -40,10 +40,40 @@ def dump():
         adb("shell", "uiautomator", "dump", "/sdcard/ui.xml", check=False)
         raw = adb("exec-out", "cat", "/sdcard/ui.xml", check=False)
         try:
-            return ET.fromstring(raw.decode("utf-8", "replace"))
+            root = ET.fromstring(raw.decode("utf-8", "replace"))
         except ET.ParseError:
             time.sleep(1)
+            continue
+        if not dismiss_system_dialog(root):
+            return root
     raise RuntimeError("Ekran tuzilishini o'qib bo'lmadi")
+
+
+def dismiss_system_dialog(root):
+    """Boshqa ilova haqidagi tizim oynasini yopadi. Yopgan bo'lsa True qaytaradi.
+
+    CI emulyatori sekin ishlaganda Android "Pixel Launcher isn't responding" kabi oyna chiqaradi.
+    U Amora'ga aloqador emas, lekin ekranni to'sib qo'yadi va sinov hech narsani ko'ra olmaydi.
+    Oyna Amora'ning o'zi haqida bo'lsa, bu haqiqiy xato: sinov shu yerda to'xtaydi.
+    """
+    items = list(nodes(root))
+    title = next(
+        (node["text"] for node in items if "isn't responding" in node["text"] or "keeps stopping" in node["text"]),
+        None,
+    )
+    if title is None:
+        return False
+    if "Amora" in title:
+        raise RuntimeError(f"Ilova ishlamay qoldi: {title}")
+    button = next((node for node in items if node["text"] == "Wait"), None)
+    if button is None:
+        button = next((node for node in items if node["text"] == "Close app"), None)
+    if button is None:
+        raise RuntimeError(f"Tizim oynasini yopib bo'lmadi: {title}")
+    print(f"[ogohlantirish] tizim oynasi yopildi: {title}", flush=True)
+    adb("shell", "input", "tap", str(button["x"]), str(button["y"]))
+    time.sleep(2)
+    return True
 
 
 def nodes(root):
