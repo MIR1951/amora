@@ -81,3 +81,36 @@ jobs:
           path: smoke-output
           if-no-files-found: warn
           retention-days: 14
+
+  # APK va sinov rasmlarini "ci-artifacts" shoxiga yozadi: u yerdan to'g'ridan-to'g'ri
+  # yuklab olish mumkin. Shox har safar qayta yoziladi, unda faqat oxirgi yig'ilgan versiya turadi.
+  publish:
+    name: Natijalarni saqlash
+    needs: [build, smoke]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: ci-artifacts shoxiga yozish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir publish
+          cp artifacts/amora-apk/*.apk publish/amora.apk
+          if [ -d artifacts/smoke-screenshots ]; then
+            cp -r artifacts/smoke-screenshots publish/screenshots
+          fi
+          printf 'run: %s\ncommit: %s\nref: %s\nsmoke: %s\n' \
+            "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$GITHUB_REF" "${{ needs.smoke.result }}" > publish/BUILD.txt
+          cd publish
+          git init -q -b ci-artifacts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build $GITHUB_RUN_NUMBER"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-artifacts
