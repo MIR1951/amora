@@ -134,7 +134,12 @@ Server manzili bitta joyda turadi: `android/gradle.properties` dagi `amora.apiBa
 
 ### APK yig'ish
 
-APK GitHub Actions'da yig'iladi (`.github/workflows/android.yml`): testlar o'tadi, APK tayyorlanadi, so'ng ilova emulyatorda ochilib, asosiy ekranlar rasmga olinadi (`android/ci/smoke_test.py`). Bu sinov haqiqiy serverga faqat o'qish so'rovlarini yuboradi, buyurtma bermaydi. Tayyor APK va rasmlar har bir ishga tushirishning "Artifacts" bo'limida turadi.
+APK GitHub Actions'da yig'iladi (`.github/workflows/android.yml`): testlar o'tadi, APK tayyorlanadi, so'ng ilova emulyatorda ikki marta sinaladi (`android/ci/smoke_test.py`):
+
+- mijozlar oladigan APK haqiqiy server bilan ochiladi: menyu, savat, xarita, profil. Bu sinov serverga faqat o'qish so'rovlarini yuboradi, buyurtma bermaydi;
+- sinov APK'si shu ishning o'zida ko'tarilgan sinov serveri bilan buyurtmaning butun yo'lini bosib o'tadi: buyurtma berish, kafe qabul qilishi, kuryer yo'lga chiqishi, yetkazilishi, mijoz bekor qilishi, kafe rad etishi, qayta buyurtma berish. Kafe xodimining tugmalari o'rnini `android/ci/backend_ctl.py` bosadi. Haqiqiy kafega hech narsa yuborilmaydi.
+
+Tayyor APK va ekran rasmlari har bir ishga tushirishning "Artifacts" bo'limida va `ci-artifacts` shoxida turadi (shoxda faqat oxirgi yig'ilgan versiya).
 
 Kompyuterda yig'ish uchun Android SDK va JDK 17 kerak:
 

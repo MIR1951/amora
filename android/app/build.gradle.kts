@@ -6,6 +6,9 @@ plugins {
 }
 
 val apiBaseUrl = providers.gradleProperty("amora.apiBaseUrl").get().trimEnd('/')
+// Sinov (debug) yig'ilishini boshqa serverga qaratish mumkin, masalan CI ichidagi sinov serveriga:
+// -Pamora.debugApiBaseUrl=http://10.0.2.2:8000. Berilmasa, asosiy server ishlatiladi.
+val debugApiBaseUrl = providers.gradleProperty("amora.debugApiBaseUrl").orNull?.trimEnd('/') ?: apiBaseUrl
 val appVersionName = providers.gradleProperty("amora.versionName").get()
 val appVersionCode = providers.gradleProperty("amora.versionCode").get().toInt()
 
@@ -36,6 +39,7 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("testing")
+            buildConfigField("String", "API_BASE_URL", "\"$debugApiBaseUrl\"")
         }
         release {
             isMinifyEnabled = false
