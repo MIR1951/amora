@@ -1,14 +1,30 @@
 package uz.amora.app.ui.order
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -16,23 +32,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,8 +48,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -62,23 +78,34 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
+import uz.amora.app.R
 import uz.amora.app.data.ApiException
 import uz.amora.app.data.Order
 import uz.amora.app.data.OrderStatus
-import uz.amora.app.ui.components.BackTopBar
 import uz.amora.app.ui.components.BigButton
-import uz.amora.app.ui.components.BottomActionBar
-import uz.amora.app.ui.components.IconBadge
-import uz.amora.app.ui.components.LoadingBox
+import uz.amora.app.ui.components.BottomDock
+import uz.amora.app.ui.components.ConfirmDialog
+import uz.amora.app.ui.components.GlassTopBar
+import uz.amora.app.ui.components.LinkRow
 import uz.amora.app.ui.components.MessageBox
 import uz.amora.app.ui.components.OrderProgressBar
-import uz.amora.app.ui.components.OrderStatusIcon
+import uz.amora.app.ui.components.PriceText
+import uz.amora.app.ui.components.RefreshBox
+import uz.amora.app.ui.components.RowDivider
 import uz.amora.app.ui.components.SectionCard
+import uz.amora.app.ui.components.SkeletonBox
 import uz.amora.app.ui.components.SoftButton
-import uz.amora.app.ui.components.SummaryRow
-import uz.amora.app.ui.components.statusContainerColor
-import uz.amora.app.ui.components.statusContentColor
+import uz.amora.app.ui.components.glassSource
+import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.components.softShadow
 import uz.amora.app.ui.profile.dialPhone
+import uz.amora.app.ui.theme.PriceLargeStyle
+import uz.amora.app.ui.theme.amber
+import uz.amora.app.ui.theme.hint
+import uz.amora.app.ui.theme.info
+import uz.amora.app.ui.theme.infoContainer
+import uz.amora.app.ui.theme.ink
+import uz.amora.app.ui.theme.onInkMuted
 import uz.amora.app.ui.theme.success
 import uz.amora.app.util.formatDateTime
 import uz.amora.app.util.formatPhone
@@ -144,24 +171,32 @@ class OrderViewModel(private val container: AppContainer, private val orderId: I
     /** Xuddi shu taomlarni savatga soladi. Savatga tushgan taomlar sonini qaytaradi. */
     fun repeatOrder(): Int {
         val order = _state.value.order ?: return 0
-        val menuProducts = container.catalog.state.value.menu?.products
-        val items = LinkedHashMap<Int, Int>()
-        for (item in order.items) {
-            val productId = item.productId ?: continue
-            // Menyu yuklangan bo'lsa, faqat hozir sotuvda bor taomlar olinadi
-            if (menuProducts != null && menuProducts.none { it.id == productId && it.isAvailable }) continue
-            items[productId] = (items[productId] ?: 0) + item.quantity
-        }
-        if (items.isNotEmpty()) {
-            container.cart.replace(items)
-        } else {
-            _state.update { it.copy(message = "Bu taomlar hozir menyuda yo'q") }
-        }
-        return items.size
+        val added = repeatOrder(container, order)
+        if (added == 0) _state.update { it.copy(message = REPEAT_UNAVAILABLE) }
+        return added
     }
 }
 
-/** Bitta buyurtma: holati, tarkibi va summasi. Faol buyurtma o'zi yangilanib turadi. */
+const val REPEAT_UNAVAILABLE = "Bu taomlar hozir menyuda yo'q"
+
+/**
+ * Buyurtmadagi taomlarni savatga soladi (savatdagi eski taomlar o'rniga).
+ * Savatga tushgan taomlar turini qaytaradi: 0 bo'lsa, hech biri hozir menyuda yo'q.
+ */
+fun repeatOrder(container: AppContainer, order: Order): Int {
+    val menuProducts = container.catalog.state.value.menu?.products
+    val items = LinkedHashMap<Int, Int>()
+    for (item in order.items) {
+        val productId = item.productId ?: continue
+        // Menyu yuklangan bo'lsa, faqat hozir sotuvda bor taomlar olinadi
+        if (menuProducts != null && menuProducts.none { it.id == productId && it.isAvailable }) continue
+        items[productId] = (items[productId] ?: 0) + item.quantity
+    }
+    if (items.isNotEmpty()) container.cart.replace(items)
+    return items.size
+}
+
+/** Bitta buyurtma: jonli holati, bosqichlari, tarkibi va summasi. Faol buyurtma o'zi yangilanib turadi. */
 @Composable
 fun OrderScreen(
     container: AppContainer,
@@ -177,6 +212,7 @@ fun OrderScreen(
     val shop = container.catalog.state.collectAsStateWithLifecycle().value.shop
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
+    val glass = rememberGlassState()
     val snackbar = remember { SnackbarHostState() }
     var confirmCancel by rememberSaveable { mutableStateOf(false) }
 
@@ -202,15 +238,19 @@ fun OrderScreen(
     }
 
     val order = state.order
+    // Pastki panel bor paytda u tizim tugmalari uchun joyni o'zi qoldiradi
+    val docked = order != null && !order.isActive
+    val systemBarSpace = if (docked) Modifier else Modifier.navigationBarsPadding()
 
     Scaffold(
         containerColor = scheme.background,
-        topBar = { BackTopBar(title = "Buyurtma №$orderId", onBack = onBack) },
-        snackbarHost = { SnackbarHost(snackbar) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = { GlassTopBar(glass = glass, title = "Buyurtma №$orderId", onBack = onBack) },
+        snackbarHost = { SnackbarHost(snackbar, modifier = systemBarSpace) },
         bottomBar = {
             // Tugagan buyurtmani bir bosishda takrorlash mumkin
-            if (order != null && !order.isActive) {
-                BottomActionBar {
+            if (docked) {
+                BottomDock(glass = glass) {
                     BigButton(
                         text = "Yana shunday buyurtma berish",
                         onClick = {
@@ -221,49 +261,59 @@ fun OrderScreen(
             }
         },
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = state.refreshing,
+        val top = padding.calculateTopPadding()
+        val bottom = padding.calculateBottomPadding()
+        RefreshBox(
+            refreshing = state.refreshing,
             onRefresh = { vm.pullToRefresh() },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .glassSource(glass),
+            indicatorTop = top,
         ) {
             when {
-                order == null && state.loading -> LoadingBox()
+                order == null && state.loading -> OrderSkeleton(top = top)
 
                 order == null -> MessageBox(
-                    icon = Icons.Default.Refresh,
+                    icon = R.drawable.ic_refresh,
                     title = "Buyurtma yuklanmadi",
                     text = state.error,
                     actionLabel = "Qayta urinish",
                     onAction = { vm.retry() },
+                    modifier = Modifier.padding(top = top),
                 )
 
                 else -> Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+                        .padding(start = 16.dp, end = 16.dp, top = top, bottom = bottom)
+                        .then(systemBarSpace)
+                        .padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    StatusCard(order)
+                    StatusHero(order)
+
+                    val stopped = order.status == OrderStatus.REJECTED || order.status == OrderStatus.CANCELLED
+                    if (!stopped) Timeline(order)
+
+                    val cafePhone = shop?.phone
+                    if (order.isActive && !cafePhone.isNullOrBlank()) {
+                        SoftButton(
+                            text = "Kafega qo'ng'iroq",
+                            onClick = { dialPhone(context, cafePhone) },
+                            icon = R.drawable.ic_phone,
+                            accent = true,
+                        )
+                    }
 
                     if (order.canCancel) {
                         SoftButton(
                             text = if (state.cancelling) "Bekor qilinmoqda…" else "Buyurtmani bekor qilish",
                             onClick = { confirmCancel = true },
-                            icon = Icons.Default.Close,
+                            icon = R.drawable.ic_close,
                             enabled = !state.cancelling,
                             danger = true,
-                        )
-                    }
-
-                    val cafePhone = shop?.phone
-                    if (order.isActive && !cafePhone.isNullOrBlank()) {
-                        SoftButton(
-                            text = "Kafega qo'ng'iroq qilish: ${formatPhone(cafePhone)}",
-                            onClick = { dialPhone(context, cafePhone) },
-                            icon = Icons.Default.Phone,
                         )
                     }
 
@@ -275,38 +325,16 @@ fun OrderScreen(
     }
 
     if (confirmCancel) {
-        AlertDialog(
-            onDismissRequest = { confirmCancel = false },
-            containerColor = scheme.surface,
-            title = { Text("Buyurtmani bekor qilasizmi?", style = MaterialTheme.typography.titleLarge) },
-            text = {
-                Text(
-                    text = "Kafe buyurtmani hali qabul qilmagan. Bekor qilsangiz, u kafega yuborilmaydi.",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+        ConfirmDialog(
+            title = "Buyurtmani bekor qilasizmi?",
+            text = "Kafe buyurtmani hali qabul qilmagan. Bekor qilsangiz, u kafega yuborilmaydi.",
+            confirmLabel = "Bekor qilish",
+            dismissLabel = "Yo'q, qolsin",
+            onConfirm = {
+                confirmCancel = false
+                vm.cancel()
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirmCancel = false
-                        vm.cancel()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = scheme.error,
-                        contentColor = scheme.onError,
-                    ),
-                ) { Text("Bekor qilish", style = MaterialTheme.typography.labelLarge) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmCancel = false }) {
-                    Text(
-                        text = "Yo'q, qolsin",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
-            },
+            onDismiss = { confirmCancel = false },
         )
     }
 }
@@ -328,188 +356,370 @@ private fun statusDescription(order: Order): String = when (order.status) {
     else -> ""
 }
 
+/** Holat vaqti ostidagi qisqa izoh: shu vaqtda nima bo'lgani. */
+private fun statusTimeCaption(status: String): String = when (status) {
+    OrderStatus.NEW -> "yuborildi"
+    OrderStatus.ACCEPTED -> "qabul qilindi"
+    OrderStatus.DELIVERING -> "yo'lga chiqdi"
+    OrderStatus.DELIVERED -> "yetkazildi"
+    OrderStatus.REJECTED -> "javob berildi"
+    OrderStatus.CANCELLED -> "to'xtatildi"
+    else -> ""
+}
+
+private data class Step(val status: String, val label: String, val icon: Int)
+
 private val STEPS = listOf(
-    OrderStatus.NEW to "Buyurtma yuborildi",
-    OrderStatus.ACCEPTED to "Kafe qabul qildi",
-    OrderStatus.DELIVERING to "Kuryer yo'lga chiqdi",
-    OrderStatus.DELIVERED to "Yetkazildi",
+    Step(OrderStatus.NEW, "Buyurtma yuborildi", R.drawable.ic_send),
+    Step(OrderStatus.ACCEPTED, "Kafe qabul qildi", R.drawable.ic_chef),
+    Step(OrderStatus.DELIVERING, "Kuryer yo'lga chiqdi", R.drawable.ic_bike),
+    Step(OrderStatus.DELIVERED, "Yetkazildi", R.drawable.ic_home),
 )
 
-/** Buyurtma holati: katta belgi, sarlavha, izoh va bosqichlar. */
+/** Ko'mir rangli blok: buyurtma hozir qaysi holatda, qachondan beri va umumiy yo'lning qancha qismi o'tilgan. */
 @Composable
-private fun StatusCard(order: Order) {
+private fun StatusHero(order: Order) {
     val scheme = MaterialTheme.colorScheme
     val stopped = order.status == OrderStatus.REJECTED || order.status == OrderStatus.CANCELLED
-    val accent = when (order.status) {
-        OrderStatus.DELIVERED -> scheme.success
-        else -> scheme.primary
+    val delivered = order.status == OrderStatus.DELIVERED
+    val dotColor = when {
+        order.isActive -> scheme.amber
+        delivered -> Color(0xFF4CCB8C)
+        else -> scheme.onInkMuted
     }
-    SectionCard(padding = 18.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconBadge(size = 60.dp, container = statusContainerColor(order.status)) {
-                OrderStatusIcon(
-                    status = order.status,
-                    modifier = Modifier.size(30.dp),
-                    tint = statusContentColor(order.status),
-                )
-            }
-            Spacer(Modifier.width(14.dp))
+    val time = (order.history.lastOrNull { it.status == order.status }?.createdAt ?: order.updatedAt)
+    val shape = RoundedCornerShape(30.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .softShadow(shape, elevation = 16.dp, alpha = 0.24f)
+            .clip(shape)
+            .background(scheme.ink)
+            .padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(order.statusLabel, style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveDot(color = dotColor, pulsing = order.isActive)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (order.isActive) "Jonli holat" else "Yakunlangan",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onInkMuted,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                AnimatedContent(
+                    targetState = order.statusLabel,
+                    transitionSpec = {
+                        (fadeIn(tween(260)) + slideInVertically(tween(320)) { it / 3 }) togetherWith
+                            (fadeOut(tween(180)) + slideOutVertically(tween(260)) { -it / 3 })
+                    },
+                    label = "status-title",
+                ) { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = Color.White,
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.padding(top = 2.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(text = formatTime(time), style = PriceLargeStyle, color = Color.White, maxLines = 1)
                 Text(
-                    text = statusDescription(order),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = scheme.onSurfaceVariant,
+                    text = statusTimeCaption(order.status),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onInkMuted,
+                    maxLines = 1,
+                    textAlign = TextAlign.End,
                 )
             }
         }
-
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = statusDescription(order),
+            style = MaterialTheme.typography.bodyMedium,
+            color = scheme.onInkMuted,
+        )
         if (!stopped) {
-            Spacer(Modifier.height(18.dp))
-            OrderProgressBar(status = order.status, color = accent)
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
+            OrderProgressBar(
+                status = order.status,
+                color = if (delivered) Color(0xFF4CCB8C) else scheme.primary,
+                track = Color.White.copy(alpha = 0.14f),
+            )
+        }
+    }
+}
 
-            val currentIndex = STEPS.indexOfFirst { it.first == order.status }
-            STEPS.forEachIndexed { index, step ->
-                val done = index <= currentIndex
-                val time = order.history.lastOrNull { it.status == step.first }?.createdAt
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(if (done) accent else scheme.surfaceVariant),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (done) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(scheme.outline),
-                            )
-                        }
+/** Kichik nuqta. Buyurtma faol bo'lsa, atrofida to'lqin tarqalib turadi: holat jonli kuzatilmoqda. */
+@Composable
+private fun LiveDot(color: Color, pulsing: Boolean) {
+    Box(modifier = Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+        if (pulsing) {
+            val transition = rememberInfiniteTransition(label = "live-dot")
+            val pulse by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart),
+                label = "live-dot-pulse",
+            )
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .graphicsLayer {
+                        val scale = 0.45f + pulse * 0.55f
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = (1f - pulse) * 0.55f
                     }
-                    Spacer(Modifier.width(12.dp))
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+    }
+}
+
+/** Buyurtma bosqichlari: o'tilgani belgilangan, hozirgisi ajratilgan, kelgusisi xira. */
+@Composable
+private fun Timeline(order: Order) {
+    val scheme = MaterialTheme.colorScheme
+    val currentIndex = STEPS.indexOfFirst { it.status == order.status }
+    val finished = order.status == OrderStatus.DELIVERED
+    SectionCard(padding = 16.dp) {
+        STEPS.forEachIndexed { index, step ->
+            val done = index < currentIndex || (finished && index == currentIndex)
+            val now = !finished && index == currentIndex
+            val time = order.history.lastOrNull { it.status == step.status }?.createdAt
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StepTile(icon = step.icon, done = done, now = now)
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    text = step.label,
+                    style = if (done || now) {
+                        MaterialTheme.typography.titleSmall
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    },
+                    color = if (done || now) scheme.onSurface else scheme.hint,
+                    modifier = Modifier.weight(1f),
+                )
+                if ((done || now) && time != null) {
                     Text(
-                        text = step.second,
-                        style = if (index == currentIndex) {
-                            MaterialTheme.typography.titleSmall
-                        } else {
-                            MaterialTheme.typography.bodyMedium
-                        },
-                        color = if (done) scheme.onSurface else scheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (done && time != null) {
-                        Text(
-                            text = formatTime(time),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (index < STEPS.lastIndex) {
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 11.dp, top = 3.dp, bottom = 3.dp)
-                            .width(2.dp)
-                            .height(14.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (index < currentIndex) accent else scheme.outlineVariant),
+                        text = formatTime(time),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.hint,
                     )
                 }
+            }
+            if (index < STEPS.lastIndex) {
+                StepConnector(solid = index < currentIndex)
             }
         }
     }
 }
 
 @Composable
+private fun StepTile(icon: Int, done: Boolean, now: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    val base = Modifier
+        .size(34.dp)
+        .clip(shape)
+    val styled = when {
+        done -> base.background(scheme.primary)
+        now -> base
+            .background(scheme.primaryContainer)
+            .border(1.5.dp, scheme.primary, shape)
+        else -> base.background(scheme.surfaceVariant)
+    }
+    Box(modifier = styled, contentAlignment = Alignment.Center) {
+        Icon(
+            painter = painterResource(if (done) R.drawable.ic_check else icon),
+            contentDescription = null,
+            tint = when {
+                done -> Color.White
+                now -> scheme.primary
+                else -> scheme.hint
+            },
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+/** Ikki bosqich orasidagi chiziq: o'tilgan yo'l uzluksiz, kelgusi yo'l punktir. */
+@Composable
+private fun StepConnector(solid: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val color = if (solid) scheme.primary else scheme.outline
+    Canvas(
+        modifier = Modifier
+            .padding(start = 16.dp, top = 3.dp, bottom = 3.dp)
+            .size(width = 2.dp, height = 14.dp),
+    ) {
+        drawLine(
+            color = color,
+            start = Offset(size.width / 2, 0f),
+            end = Offset(size.width / 2, size.height),
+            strokeWidth = size.width,
+            cap = StrokeCap.Round,
+            pathEffect = if (solid) null else PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 4.dp.toPx())),
+        )
+    }
+}
+
+/** Buyurtma tarkibi va summasi: chekdagidek qisqa qatorlar. */
+@Composable
 private fun ItemsCard(order: Order) {
     val scheme = MaterialTheme.colorScheme
-    SectionCard {
-        Text("Buyurtma tarkibi", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(10.dp))
+    SectionCard(padding = 0.dp) {
         for (item in order.items) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            MiniRow {
                 Text(
-                    text = "${item.quantity} ×",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = scheme.onSurface,
-                    maxLines = 1,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(scheme.surfaceVariant)
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = item.name,
+                    text = buildAnnotatedString {
+                        withStyle(SpanStyle(color = scheme.primary, fontWeight = FontWeight.Bold)) {
+                            append("${item.quantity}×")
+                        }
+                        append("  ")
+                        append(item.name)
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(12.dp))
-                Text(formatSum(item.lineTotal), style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text(formatSum(item.lineTotal), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            }
+            RowDivider(inset = 16.dp)
+        }
+        MiniRow {
+            Text(
+                text = "Yetkazish",
+                style = MaterialTheme.typography.bodyLarge,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (order.deliveryFee == 0) {
+                Text("Bepul", style = MaterialTheme.typography.titleSmall, color = scheme.success)
+            } else {
+                Text(formatSum(order.deliveryFee), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             }
         }
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 10.dp),
-            color = scheme.outlineVariant,
-        )
-        SummaryRow("Taomlar", formatSum(order.itemsTotal))
-        SummaryRow(
-            label = "Yetkazish",
-            value = if (order.deliveryFee == 0) "Bepul" else formatSum(order.deliveryFee),
-            valueColor = if (order.deliveryFee == 0) scheme.success else scheme.onSurface,
-        )
-        SummaryRow("Jami", formatSum(order.total), strong = true)
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = "To'lov: kuryerga naqd pul bilan",
-            style = MaterialTheme.typography.labelMedium,
-            color = scheme.onSurfaceVariant,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(scheme.surfaceVariant)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        )
+        RowDivider(inset = 16.dp)
+        MiniRow(vertical = 15.dp) {
+            Text(
+                text = "Jami · naqd",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            PriceText(amount = order.total, style = PriceLargeStyle.copy(fontSize = PriceLargeStyle.fontSize * 0.86f), unitColor = scheme.onSurface)
+        }
     }
 }
 
+@Composable
+private fun MiniRow(vertical: Dp = 13.dp, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = vertical),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** Qayerga, kimga va qachon: manzil, qabul qiluvchi, izoh. */
 @Composable
 private fun DetailsCard(order: Order) {
-    SectionCard {
-        Text("Yetkazish ma'lumotlari", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(6.dp))
-        DetailRow("Berilgan vaqti", formatDateTime(order.createdAt))
-        DetailRow("Manzil", order.addressNote.ifBlank { "Xaritada belgilangan joy" })
-        DetailRow("Qabul qiluvchi", "${order.customerName}, ${formatPhone(order.phone)}")
-        if (order.comment.isNotBlank()) DetailRow("Izoh", order.comment)
+    val scheme = MaterialTheme.colorScheme
+    SectionCard(padding = 0.dp) {
+        LinkRow(
+            icon = R.drawable.ic_pin,
+            label = "Manzil · ${formatDateTime(order.createdAt)}",
+            value = order.addressNote.ifBlank { "Xaritada belgilangan joy" },
+        )
+        RowDivider()
+        LinkRow(
+            icon = R.drawable.ic_user,
+            label = "Qabul qiluvchi",
+            value = "${order.customerName}, ${formatPhone(order.phone)}",
+            tileContainer = scheme.infoContainer,
+            tileTint = scheme.info,
+        )
+        if (order.comment.isNotBlank()) {
+            RowDivider()
+            LinkRow(
+                icon = R.drawable.ic_message,
+                label = "Izoh",
+                value = order.comment,
+                tileContainer = scheme.surfaceVariant,
+                tileTint = scheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
+/** Buyurtma birinchi marta yuklanayotganda: sahifa shaklini takrorlaydigan skelet. */
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Column(modifier = Modifier.padding(vertical = 5.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun OrderSkeleton(top: Dp) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.large
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = top),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SkeletonBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(178.dp),
+            shape = RoundedCornerShape(30.dp),
         )
-        Text(text = value, style = MaterialTheme.typography.bodyLarge)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .softShadow(shape)
+                .clip(shape)
+                .background(scheme.surface)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            repeat(4) { index ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SkeletonBox(modifier = Modifier.size(34.dp), shape = RoundedCornerShape(12.dp))
+                    Spacer(Modifier.width(14.dp))
+                    SkeletonBox(modifier = Modifier.size(width = (150 - index * 14).dp, height = 14.dp))
+                    Spacer(Modifier.weight(1f))
+                    SkeletonBox(modifier = Modifier.size(width = 36.dp, height = 12.dp))
+                }
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .softShadow(shape)
+                .clip(shape)
+                .background(scheme.surface)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            repeat(3) { index ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SkeletonBox(modifier = Modifier.size(width = (130 - index * 22).dp, height = 14.dp))
+                    Spacer(Modifier.weight(1f))
+                    SkeletonBox(modifier = Modifier.size(width = 84.dp, height = 14.dp))
+                }
+            }
+        }
     }
 }

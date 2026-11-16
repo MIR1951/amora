@@ -266,28 +266,26 @@ def fill_cart():
     print("Savat:", visible_texts(), flush=True)
 
 
-def open_tab(label):
-    """Pastki menyudagi bo'limga o'tadi: "Menyu", "Buyurtmalar" yoki "Profil"."""
-    matches = [node for node in nodes(dump()) if node["text"] == label]
-    if not matches:
-        raise RuntimeError(f"Pastki menyuda topilmadi: {label!r}")
-    # Shu so'z ekranning boshqa joyida ham bo'lishi mumkin: pastki menyu hammasidan pastda turadi
-    tap_node(max(matches, key=lambda node: node["y"]))
+def open_from_home(label):
+    """Bosh sahifaning yuqori satridagi tugmani bosadi: "Buyurtmalarim" yoki "Profil"."""
+    tap(label)
 
 
 def shot_profile(name):
-    open_tab("Profil")
-    wait_for("Shaxsiy ma'lumotlar")
+    open_from_home("Profil")
+    wait_for("Yetkazish manzili")
     shot(name)
+    back()
 
 
 def scenario_readonly():
     fill_cart()
     # "Buyurtma berish" tugmasi ATAYLAB bosilmaydi: haqiqiy kafega buyurtma ketmasin.
     back()
-    open_tab("Buyurtmalar")
+    open_from_home("Buyurtmalarim")
     wait_for("Hali buyurtma yo'q")
     shot("09-orders")
+    back()
     shot_profile("10-profile")
 
 
@@ -344,7 +342,7 @@ def scenario_full():
 
     # Buyurtmalar tarixi va undan buyurtmani ochish
     back()
-    open_tab("Buyurtmalar")
+    open_from_home("Buyurtmalarim")
     wait_for("Buyurtma №")
     wait_for("Yetkazildi")
     shot("14-orders")
@@ -373,24 +371,27 @@ def scenario_full():
     shot("18-order-rejected")
 
     back()
-    open_tab("Buyurtmalar")
+    open_from_home("Buyurtmalarim")
     wait_for("Rad etildi")
     wait_for("Bekor qilindi")
     wait_for("Yetkazildi")
     shot("19-orders-all")
     print("Buyurtmalar:", visible_texts(), flush=True)
+    back()
 
     shot_profile("20-profile")
 
     # Tungi rejim: ranglar qorong'i mavzuda ham to'g'ri ko'rinishini rasmga olamiz
-    open_tab("Menyu")
     adb("shell", "cmd", "uimode", "night", "yes")
     time.sleep(4)
     wait_for(TEST_CAFE_NAME)
     shot("21-menu-dark")
-    open_tab("Buyurtmalar")
+    open_from_home("Buyurtmalarim")
     wait_for("Rad etildi")
     shot("22-orders-dark")
+    tap("Buyurtma №")
+    wait_for("Jami · naqd")
+    shot("23-order-dark")
     adb("shell", "cmd", "uimode", "night", "no")
     time.sleep(3)
 

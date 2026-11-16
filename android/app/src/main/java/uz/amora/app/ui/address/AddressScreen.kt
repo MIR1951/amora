@@ -8,39 +8,47 @@ import android.location.Location
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,10 +60,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -64,6 +79,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -78,8 +95,15 @@ import uz.amora.app.AppContainer
 import uz.amora.app.R
 import uz.amora.app.data.Address
 import uz.amora.app.ui.components.BigButton
-import uz.amora.app.ui.components.CircleIconButton
+import uz.amora.app.ui.components.GlassBox
+import uz.amora.app.ui.components.GlassTone
+import uz.amora.app.ui.components.IconTile
+import uz.amora.app.ui.components.RoundButton
+import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
+import uz.amora.app.ui.components.glassSource
+import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.theme.amber
 import uz.amora.app.util.distanceKm
 
 // Manzil hali tanlanmagan va kafe joylashuvi ham kiritilmagan bo'lsa, xarita shu yerdan ochiladi
@@ -93,19 +117,29 @@ private const val STREET_ZOOM = 17.0
 private const val MIN_CONFIRM_ZOOM = 14.0
 private const val MAX_NOTE_LENGTH = 255
 
-// Pastki panel burchagi: xarita shu qadar panel ostiga kirib turadi
-private val PANEL_CORNER = 26.dp
-private val PIN_HEAD = 38.dp
-private val PIN_STEM = 16.dp
+// Xarita ustidagi yuqori tugmalar egallaydigan joy (holat satridan tashqari)
+private val TOP_CONTROLS = 60.dp
+private val SHEET_CORNER = 32.dp
+private val PIN_HEAD = 46.dp
+private val PIN_STEM = 18.dp
+private val PIN_GROUND = 6.dp
+
+// Xarita surilishi shuncha vaqt to'xtab tursa, belgi joyiga "qo'nadi"
+private const val PIN_SETTLE_MS = 220L
+private const val ZOOM_NOTICE = "Xaritani yaqinlashtirib, yetkazish joyini aniqroq belgilang."
 
 /**
- * Yetkazish manzilini tanlash. Xarita suriladi, o'rtadagi belgi turgan joy manzil bo'ladi.
- * Xarita: OpenStreetMap (kalit yoki to'lov talab qilmaydi).
+ * Yetkazish manzilini tanlash. Xarita butun ekranni egallaydi va suriladi; belgi turgan joy manzil bo'ladi.
+ * Tugmalar va pastki panel xarita ustida shisha bo'lib turadi. Xarita: OpenStreetMap
+ * (kalit yoki to'lov talab qilmaydi).
  */
 @Composable
 fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
+    val glass = rememberGlassState()
     val saved = container.session.address.collectAsStateWithLifecycle().value
     val shop = container.catalog.state.collectAsStateWithLifecycle().value.shop
     val finder = remember { LocationFinder(context) }
@@ -117,14 +151,17 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         if (cafeLatitude != null && cafeLongitude != null) GeoPoint(cafeLatitude, cafeLongitude) else null
     }
 
+    val startPoint = remember {
+        when {
+            saved != null -> GeoPoint(saved.latitude, saved.longitude)
+            cafePoint != null -> GeoPoint(cafePoint.latitude, cafePoint.longitude)
+            else -> GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE)
+        }
+    }
     val mapView = remember {
         createMapView(
             context = context,
-            start = when {
-                saved != null -> GeoPoint(saved.latitude, saved.longitude)
-                cafePoint != null -> cafePoint
-                else -> GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE)
-            },
+            start = startPoint,
             zoom = when {
                 saved != null -> STREET_ZOOM
                 cafePoint != null -> CITY_ZOOM
@@ -134,13 +171,45 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     }
     val myLocationMarker = remember { createMyLocationMarker(context, mapView) }
 
-    var center by remember {
-        mutableStateOf(GeoPoint(mapView.mapCenter.latitude, mapView.mapCenter.longitude))
+    // Belgi xaritaning ko'rinib turgan qismi (yuqori tugmalar va pastki panel orasi) o'rtasida turadi.
+    // Shu sabab u ekran markazidan `pinOffsetPx` qadar yuqoriroqda bo'ladi.
+    var pinOffsetPx by remember { mutableIntStateOf(0) }
+    var sheetHeightPx by remember { mutableIntStateOf(0) }
+    val statusBarPx = WindowInsets.statusBars.getTop(density)
+    val navigationBarPx = WindowInsets.navigationBars.getBottom(density)
+    val topControlsPx = with(density) { TOP_CONTROLS.roundToPx() }
+
+    // Belgi ko'rsatib turgan nuqta
+    val pinPoint: () -> GeoPoint = {
+        if (mapView.isLayoutOccurred && mapView.width > 0 && mapView.height > 0) {
+            val point = mapView.projection.fromPixels(mapView.width / 2, mapView.height / 2 + pinOffsetPx)
+            GeoPoint(point.latitude, point.longitude)
+        } else {
+            startPoint
+        }
     }
+
+    var center by remember { mutableStateOf(startPoint) }
+    var moving by remember { mutableStateOf(false) }
     var note by rememberSaveable { mutableStateOf(saved?.note ?: "") }
     var locating by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var locationOff by remember { mutableStateOf(false) }
+
+    // Pastki panel balandligi ma'lum bo'lgach (yoki o'zgarsa), belgi joyi qayta hisoblanadi.
+    // Tanlangan nuqta o'zgarmaydi: xarita shunga mos suriladi.
+    LaunchedEffect(sheetHeightPx, statusBarPx, navigationBarPx) {
+        if (sheetHeightPx > 0) {
+            val offset = (statusBarPx + topControlsPx - sheetHeightPx - navigationBarPx) / 2
+            if (offset != pinOffsetPx) {
+                val keep = pinPoint()
+                pinOffsetPx = offset
+                mapView.setMapCenterOffset(0, offset)
+                mapView.controller.setCenter(keep)
+                mapView.invalidate()
+            }
+        }
+    }
 
     val outOfZone by remember(cafePoint, maxDeliveryKm) {
         derivedStateOf {
@@ -149,21 +218,33 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
-    // Xarita surilganda o'rtadagi nuqtani kuzatib boramiz
+    // Xarita surilganda belgi ko'rsatayotgan nuqtani kuzatib boramiz
     DisposableEffect(mapView) {
         val listener = object : MapListener {
             override fun onScroll(event: ScrollEvent?): Boolean {
-                center = GeoPoint(mapView.mapCenter.latitude, mapView.mapCenter.longitude)
+                center = pinPoint()
+                moving = true
                 return false
             }
 
             override fun onZoom(event: ZoomEvent?): Boolean {
-                center = GeoPoint(mapView.mapCenter.latitude, mapView.mapCenter.longitude)
+                center = pinPoint()
+                moving = true
+                // Xarita yetarlicha yaqinlashtirilgach, shu haqdagi ogohlantirish o'chadi
+                if (notice == ZOOM_NOTICE && mapView.zoomLevelDouble >= MIN_CONFIRM_ZOOM) notice = null
                 return false
             }
         }
         mapView.addMapListener(listener)
         onDispose { mapView.removeMapListener(listener) }
+    }
+
+    // Xarita to'xtagach belgi joyiga qo'nadi
+    LaunchedEffect(center, moving) {
+        if (moving) {
+            delay(PIN_SETTLE_MS)
+            moving = false
+        }
     }
 
     // Yetkazish hududi chegarasi (kafe atrofidagi doira)
@@ -187,7 +268,14 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_RESUME -> {
+                    mapView.onResume()
+                    // Sozlamalardan GPS yoqib qaytilgan bo'lsa, ogohlantirish yo'qoladi
+                    if (locationOff && finder.isEnabled()) {
+                        locationOff = false
+                        notice = null
+                    }
+                }
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 else -> Unit
             }
@@ -263,197 +351,334 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     val confirm: () -> Unit = {
         if (mapView.zoomLevelDouble < MIN_CONFIRM_ZOOM) {
             locationOff = false
-            notice = "Xaritani yaqinlashtirib, yetkazish joyini aniqroq belgilang."
+            notice = ZOOM_NOTICE
         } else {
-            val point = mapView.mapCenter
+            val point = pinPoint()
             container.session.saveAddress(Address(point.latitude, point.longitude, note.trim()))
             onBack()
         }
     }
 
     val scheme = MaterialTheme.colorScheme
+    val warning = if (outOfZone) {
+        "Bu joy yetkazish hududidan tashqarida. Belgini doira ichiga suring."
+    } else {
+        notice
+    }
 
-    Scaffold(
-        modifier = Modifier.imePadding(),
-        containerColor = scheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            Surface(
-                color = scheme.surface,
-                shadowElevation = 16.dp,
-                shape = RoundedCornerShape(topStart = PANEL_CORNER, topEnd = PANEL_CORNER),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 12.dp),
-                ) {
-                    Text("Yetkazish manzili", style = MaterialTheme.typography.titleLarge)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "Xaritani surib, belgini yetkazish joyiga qo'ying",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(14.dp))
-
-                    val currentNotice = notice
-                    val warning = when {
-                        outOfZone -> "Bu joy yetkazish hududidan tashqarida. Belgini doira ichiga suring."
-                        else -> currentNotice
-                    }
-                    if (warning != null) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.medium,
-                            color = scheme.errorContainer,
-                            contentColor = scheme.onErrorContainer,
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Text(warning, style = MaterialTheme.typography.bodyMedium)
-                                if (!outOfZone && locationOff) {
-                                    TextButton(
-                                        onClick = { openLocationSettings(context) },
-                                        contentPadding = PaddingValues(0.dp),
-                                    ) {
-                                        Text(
-                                            text = "Joylashuv sozlamalarini ochish",
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
-
-                    TextField(
-                        value = note,
-                        onValueChange = { note = it.take(MAX_NOTE_LENGTH) },
-                        label = { Text("Mo'ljal, uy, xonadon") },
-                        placeholder = { Text("Masalan: 12-uy, 3-podyezd, 45-xonadon") },
-                        modifier = Modifier.fillMaxWidth(),
-                        maxLines = 2,
-                        shape = MaterialTheme.shapes.medium,
-                        colors = fieldColors(container = scheme.surfaceVariant),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    BigButton(
-                        text = "Shu manzilga yetkazish",
-                        onClick = confirm,
-                        enabled = !outOfZone,
-                    )
-                }
-            }
-        },
-    ) { padding ->
-        // Xarita panelning yumaloq burchaklari ostiga ham kirib turadi
-        val mapBottom = (padding.calculateBottomPadding() - PANEL_CORNER).coerceAtLeast(0.dp)
-        Box(
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(scheme.background),
+    ) {
+        AndroidView(
+            factory = { mapView },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = mapBottom),
-        ) {
-            AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+                .glassSource(glass),
+        )
 
-            // O'rtadagi belgi: uchi aynan xarita markazini ko'rsatadi
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(width = 10.dp, height = 5.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.28f)),
+        MapPin(
+            moving = moving,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .layout { measurable, constraints ->
+                    // Belgining uchi (pastki nuqtasi) aynan tanlangan joyni ko'rsatadi
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, pinOffsetPx - placeable.height / 2 + PIN_GROUND.roundToPx())
+                    }
+                },
+        )
+
+        // Holat satri ostidagi yumshoq parda: soat va belgilar xarita ustida ham o'qiladi
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(88.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(scheme.background.copy(alpha = 0.75f), scheme.background.copy(alpha = 0f)),
+                    ),
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            RoundButton(icon = R.drawable.ic_back, label = "Orqaga", onClick = onBack, glass = glass)
+            Spacer(Modifier.width(10.dp))
+            MapHint(
+                glass = glass,
+                warning = warning,
+                actionLabel = if (!outOfZone && locationOff) "Joylashuv sozlamalarini ochish" else null,
+                onAction = { openLocationSettings(context) },
+                modifier = Modifier.weight(1f, fill = false),
             )
-            Column(
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .imePadding(),
+        ) {
+            Row(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .offset(y = -(PIN_HEAD + PIN_STEM) / 2)
-                    .semantics { contentDescription = "Tanlangan joy" },
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 16.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Box(
+                // OpenStreetMap shartiga ko'ra xarita manbasi ko'rsatilishi kerak
+                Text(
+                    text = "© OpenStreetMap",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize),
+                    color = Color(0xFF333333),
                     modifier = Modifier
-                        .size(PIN_HEAD)
-                        .shadow(elevation = 6.dp, shape = CircleShape)
-                        .clip(CircleShape)
-                        .background(scheme.primary),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(14.dp)
-                            .clip(CircleShape)
-                            .background(Color.White),
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(width = 4.dp, height = PIN_STEM)
-                        .clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
-                        .background(scheme.primary),
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Color(0xCCFFFFFF))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                RoundButton(
+                    icon = R.drawable.ic_gps,
+                    label = "Mening joylashuvim",
+                    onClick = onMyLocation,
+                    size = 52.dp,
+                    shape = RoundedCornerShape(18.dp),
+                    tint = scheme.primary,
+                    glass = glass,
+                    content = if (locating) {
+                        { CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp) }
+                    } else {
+                        null
+                    },
                 )
             }
 
-            // Holat satri ostidagi yumshoq parda: soat va belgilar xarita ustida ham o'qiladi
+            AddressSheet(
+                glass = glass,
+                note = note,
+                onNoteChange = { note = it.take(MAX_NOTE_LENGTH) },
+                outOfZone = outOfZone,
+                onDone = { focusManager.clearFocus() },
+                onConfirm = confirm,
+                onMeasured = { sheetHeightPx = it },
+            )
+        }
+    }
+}
+
+/** Xarita o'rtasidagi belgi: ustida yozuv, qizil bosh va ingichka oyoq. Xarita surilayotganda biroz ko'tariladi. */
+@Composable
+private fun MapPin(moving: Boolean, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val ink = Color(0xFF17130F)
+    val lift by animateDpAsState(
+        targetValue = if (moving) 10.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 500f),
+        label = "pin-lift",
+    )
+    Column(
+        modifier = modifier.semantics { contentDescription = "Tanlangan joy" },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            modifier = Modifier.offset(y = -lift),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "Yetkazish shu yerga",
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = MaterialTheme.typography.bodySmall.letterSpacing),
+                color = Color.White,
+                maxLines = 1,
+                modifier = Modifier
+                    .shadow(6.dp, RoundedCornerShape(11.dp))
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(ink)
+                    .padding(horizontal = 11.dp, vertical = 7.dp),
+            )
+            Spacer(Modifier.height(6.dp))
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .height(96.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(scheme.background.copy(alpha = 0.85f), scheme.background.copy(alpha = 0f)),
-                        ),
-                    ),
-            )
-
-            CircleIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                label = "Orqaga",
-                onClick = onBack,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, top = 8.dp),
-                elevation = 6.dp,
-            )
-
-            // OpenStreetMap shartiga ko'ra xarita manbasi ko'rsatilishi kerak
-            Text(
-                text = "© OpenStreetMap",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF333333),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 8.dp, bottom = PANEL_CORNER + 6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xCCFFFFFF))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-
-            Surface(
-                onClick = onMyLocation,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = PANEL_CORNER + 16.dp)
-                    .size(52.dp),
-                shape = CircleShape,
-                color = scheme.surface,
-                contentColor = scheme.primary,
-                shadowElevation = 6.dp,
+                    .size(PIN_HEAD)
+                    .shadow(elevation = 8.dp, shape = CircleShape)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(4.dp)
+                    .clip(CircleShape)
+                    .background(scheme.primary),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    if (locating) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
-                    } else {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(width = 3.dp, height = PIN_STEM)
+                    .clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
+                    .background(ink),
+            )
+        }
+        // Belgi ko'tarilganda ham aynan qaysi nuqta tanlanayotgani ko'rinib turadi.
+        // Soya oyoqning uchi bilan bir nuqtada turadi: oyoq uchi tanlangan joyning o'zi.
+        Box(
+            modifier = Modifier
+                .offset(y = -PIN_GROUND / 2)
+                .size(width = 12.dp, height = PIN_GROUND)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.26f)),
+        )
+    }
+}
+
+/** Xarita ustidagi to'q shisha yozuv: odatda yo'riqnoma, muammo bo'lsa ogohlantirish. */
+@Composable
+private fun MapHint(
+    glass: HazeState,
+    warning: String?,
+    actionLabel: String?,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    GlassBox(
+        glass = glass,
+        modifier = modifier.pointerInput(Unit) {},
+        shape = RoundedCornerShape(16.dp),
+        tone = GlassTone.Dark,
+        elevation = 8.dp,
+    ) {
+        AnimatedContent(
+            targetState = warning,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            label = "map-hint",
+        ) { message ->
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (message != null) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_gps),
-                            contentDescription = "Mening joylashuvim",
+                            painter = painterResource(R.drawable.ic_info),
+                            contentDescription = null,
+                            tint = scheme.amber,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        text = message ?: "Xaritani surib, belgini yetkazish joyiga qo'ying",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                    )
+                }
+                if (message != null && actionLabel != null) {
+                    Text(
+                        text = actionLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = scheme.amber,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(role = Role.Button, onClick = onAction)
+                            .padding(vertical = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Pastki shisha panel: sarlavha, mo'ljal maydoni va tasdiqlash tugmasi. */
+@Composable
+private fun AddressSheet(
+    glass: HazeState,
+    note: String,
+    onNoteChange: (String) -> Unit,
+    outOfZone: Boolean,
+    onDone: () -> Unit,
+    onConfirm: () -> Unit,
+    onMeasured: (Int) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    GlassBox(
+        glass = glass,
+        // Panelning bo'sh joyiga bosilganda ostidagi xarita surilib ketmaydi
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {},
+        shape = RoundedCornerShape(topStart = SHEET_CORNER, topEnd = SHEET_CORNER),
+        elevation = 20.dp,
+    ) {
+        Column(modifier = Modifier.navigationBarsPadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onSizeChanged { onMeasured(it.height) }
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(scheme.outline),
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(
+                        icon = R.drawable.ic_pin,
+                        container = if (outOfZone) scheme.errorContainer else scheme.primaryContainer,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Yetkazish manzili", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            text = if (outOfZone) "Yetkazish hududidan tashqarida" else "Xaritada belgilangan joy",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (outOfZone) scheme.error else scheme.onSurfaceVariant,
+                            maxLines = 1,
                         )
                     }
                 }
+                Spacer(Modifier.height(16.dp))
+                TextField(
+                    value = note,
+                    onValueChange = onNoteChange,
+                    placeholder = { Text("Mo'ljal, uy, xonadon") },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_home),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fieldBorder(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = fieldColors(),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { onDone() }),
+                )
+                Spacer(Modifier.height(14.dp))
+                BigButton(
+                    text = "Shu manzilga yetkazish",
+                    onClick = onConfirm,
+                    enabled = !outOfZone,
+                )
             }
         }
     }
@@ -478,8 +703,8 @@ private fun createMapView(context: Context, start: GeoPoint, zoom: Double): MapV
 private fun createZoneCircle(center: GeoPoint, radiusKm: Double): Polygon {
     val circle = Polygon()
     circle.setPoints(Polygon.pointsAsCircle(center, radiusKm * 1000.0))
-    circle.setFillColor(AndroidColor.argb(22, 217, 68, 43))
-    circle.setStrokeColor(AndroidColor.argb(150, 217, 68, 43))
+    circle.setFillColor(AndroidColor.argb(22, 229, 67, 42))
+    circle.setStrokeColor(AndroidColor.argb(150, 229, 67, 42))
     circle.setStrokeWidth(4f)
     return circle
 }

@@ -1,18 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Skuter: kuryer yo'lda -->
+<!-- Savat. Maketdagi belgilar uslubida: 1.9 qalinlikdagi yumaloq chiziq. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M6,14.6 a2.4,2.4 0 1 1 0,4.8 a2.4,2.4 0 1 1 0,-4.8 Z M18.5,14.6 a2.4,2.4 0 1 1 0,4.8 a2.4,2.4 0 1 1 0,-4.8 Z"
-        android:strokeColor="#FF000000"
-        android:strokeWidth="2" />
-    <path
-        android:pathData="M8.4,17 h7.6 l-1.8,-10 h-2.4 M3.5,13 h6.5 M4.5,13 v-2.8 h4 v2.8"
+        android:pathData="M5 8h14l-1 13H6z"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="2" />
+        android:strokeWidth="1.9" />
+    <path
+        android:pathData="M9 8V6a3 3 0 0 1 6 0v2"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.9" />
 </vector>

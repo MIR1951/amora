@@ -121,9 +121,11 @@ TEST_DATABASE_URL=postgresql+asyncpg://user:parol@localhost:5432/amora_test pyte
 
 `android/` papkasida. Kotlin va Jetpack Compose'da yozilgan, Android 7.0 va undan yuqorisida ishlaydi.
 
-Ekranlar: menyu (manzil satri, kafe kartochkasi, qidiruv, bo'limlar, taom oynasi, savat tugmasi), savat (summa serverda hisoblanadi), xaritadan manzil tanlash, buyurtma holati, buyurtmalar tarixi, profil (ism va telefon). Menyu, buyurtmalar va profil pastki menyu orqali ochiladi.
+Ekranlar: menyu (kafe satri, banner, qidiruv, bo'limlar, taom oynasi, suzuvchi savat paneli), savat (summa serverda hisoblanadi), xaritadan manzil tanlash, buyurtma holati, buyurtmalar tarixi, profil (ism va telefon). Bosh sahifa: menyu. Buyurtmalar va profil uning yuqori satridagi ikki tugmadan ochiladi, pastki menyu yo'q. Ekranlar bir-biriga o'ngdan sirpanib o'tadi, ma'lumot yuklanayotganda sahifa shaklidagi skelet ko'rinadi.
 
-Dizayn asosi `android/app/src/main/java/uz/amora/app/ui/theme/Theme.kt` da (ranglar, shrift, burchaklar), umumiy tugma va kartochkalar `ui/components/Components.kt` da. Kafe o'z logotipi va ranglarini bersa, asosan shu ikki fayl o'zgaradi. Shrift: Manrope (ochiq litsenziya, `android/licenses/Manrope-OFL.txt`).
+Dizayn asosi `android/app/src/main/java/uz/amora/app/ui/theme/Theme.kt` da (ranglar, shrift, burchaklar), umumiy tugma va kartochkalar `ui/components/Components.kt` da, harakatlar (ekran o'tishlari, bosilgandagi siqilish, skelet) `ui/components/Motion.kt` da. Kafe o'z logotipi va ranglarini bersa, asosan `Theme.kt` o'zgaradi. Shriftlar: sarlavha va narxlar Bricolage Grotesque, matn Instrument Sans (ikkalasi ochiq litsenziyali, matni `android/licenses/` da).
+
+"Suyuq shisha" (liquid glass) panellar `ui/components/Glass.kt` da: yuqori satr, pastki tugma joyi, savat paneli va xarita ustidagi tugmalar ortidagi kontentni xira shisha orqali ko'rsatadi ([Haze](https://github.com/chrisbanes/haze) kutubxonasi). Haqiqiy xiralashtirish Android 12L va undan yangi telefonlarda ishlaydi, eskiroqlarida o'rniga deyarli shaffof bo'lmagan rang chiziladi. Shisha panel har doim suriladigan kontentning yonida turishi kerak, ichida emas.
 
 Qanday ishlaydi:
 

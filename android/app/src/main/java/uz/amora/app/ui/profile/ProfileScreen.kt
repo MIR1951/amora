@@ -10,23 +10,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -44,10 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -58,16 +54,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
 import uz.amora.app.BuildConfig
+import uz.amora.app.R
 import uz.amora.app.data.Profile
-import uz.amora.app.ui.components.BackTopBar
 import uz.amora.app.ui.components.BigButton
-import uz.amora.app.ui.components.BottomActionBar
+import uz.amora.app.ui.components.BottomDock
+import uz.amora.app.ui.components.GlassTopBar
 import uz.amora.app.ui.components.LinkRow
 import uz.amora.app.ui.components.PhoneVisualTransformation
+import uz.amora.app.ui.components.RowDivider
 import uz.amora.app.ui.components.SectionCard
-import uz.amora.app.ui.components.TitleTopBar
+import uz.amora.app.ui.components.SectionLabel
+import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
-import uz.amora.app.ui.theme.brandGradient
+import uz.amora.app.ui.components.glassSource
+import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.theme.hint
+import uz.amora.app.ui.theme.ink
+import uz.amora.app.ui.theme.success
+import uz.amora.app.ui.theme.successContainer
 import uz.amora.app.util.LOCAL_PHONE_LENGTH
 import uz.amora.app.util.formatPhone
 import uz.amora.app.util.fullPhone
@@ -78,21 +82,22 @@ private const val MAX_NAME_LENGTH = 60
 /**
  * Mijozning ismi va telefoni. Kuryer shu raqamga qo'ng'iroq qiladi.
  *
- * Ikki xil ochiladi: pastki menyudagi "Profil" bo'limi sifatida (`onBack == null`: manzil va
- * kafe telefoni ham ko'rinadi) yoki savatdan ism-telefonni kiritish uchun (`onBack` berilgan:
- * saqlagach orqaga qaytadi).
+ * Ikki xil ochiladi: bosh sahifadagi "Profil" tugmasidan (manzil va kafe telefoni ham ko'rinadi)
+ * yoki savatdan ism-telefonni kiritish uchun (`quickEdit`: faqat ikki maydon, saqlagach orqaga qaytadi).
  */
 @Composable
 fun ProfileScreen(
     container: AppContainer,
-    onBack: (() -> Unit)?,
+    onBack: () -> Unit,
     onPickAddress: () -> Unit,
+    quickEdit: Boolean = false,
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val scheme = MaterialTheme.colorScheme
+    val glass = rememberGlassState()
 
     val profile = container.session.profile.collectAsStateWithLifecycle().value
     val address = container.session.address.collectAsStateWithLifecycle().value
@@ -111,7 +116,7 @@ fun ProfileScreen(
         if (cleanName.isNotEmpty() && phone != null) {
             container.account.saveProfile(cleanName, phone)
             focusManager.clearFocus()
-            if (onBack != null) {
+            if (quickEdit) {
                 onBack()
             } else {
                 scope.launch { snackbar.showSnackbar("Saqlandi") }
@@ -119,20 +124,24 @@ fun ProfileScreen(
         }
     }
 
+    // Pastki panel bor paytda u tizim tugmalari uchun joyni o'zi qoldiradi
+    val systemBarSpace = if (quickEdit) Modifier else Modifier.navigationBarsPadding()
+
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = scheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            if (onBack != null) {
-                BackTopBar(title = "Ma'lumotlarim", onBack = onBack)
-            } else {
-                TitleTopBar(title = "Profil")
-            }
+            GlassTopBar(
+                glass = glass,
+                title = if (quickEdit) "Ma'lumotlarim" else "Profil",
+                onBack = onBack,
+            )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, modifier = systemBarSpace) },
         bottomBar = {
-            if (onBack != null) {
-                BottomActionBar {
+            if (quickEdit) {
+                BottomDock(glass = glass) {
                     BigButton(text = "Saqlash", onClick = save, enabled = valid)
                 }
             }
@@ -141,21 +150,28 @@ fun ProfileScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .glassSource(glass)
                 .verticalScroll(rememberScrollState())
-                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding(),
+                )
+                .then(systemBarSpace)
+                .padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (onBack == null) {
-                ProfileHeader(profile)
-                SectionLabel("Shaxsiy ma'lumotlar")
-            } else {
+            if (quickEdit) {
                 Text(
                     text = "Buyurtmani yetkazishda kuryer shu ism va raqam orqali siz bilan bog'lanadi.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = scheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
+            } else {
+                ProfileHeader(profile)
+                SectionLabel("Shaxsiy ma'lumotlar")
             }
 
             TextField(
@@ -163,7 +179,9 @@ fun ProfileScreen(
                 onValueChange = { name = it.take(MAX_NAME_LENGTH) },
                 label = { Text("Ismingiz") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fieldBorder(),
                 shape = RoundedCornerShape(18.dp),
                 colors = fieldColors(),
                 keyboardOptions = KeyboardOptions(
@@ -173,20 +191,16 @@ fun ProfileScreen(
             )
 
             val incomplete = phoneDigits.isNotEmpty() && phoneDigits.length < LOCAL_PHONE_LENGTH
-            val phoneHint: (@Composable () -> Unit)? = if (incomplete) {
-                { Text("Raqamni to'liq kiriting: 9 ta raqam") }
-            } else {
-                null
-            }
             TextField(
                 value = phoneDigits,
                 onValueChange = { phoneDigits = localPhoneDigits(it) },
                 label = { Text("Telefon raqam") },
                 prefix = { Text("+998 ") },
                 placeholder = { Text("90 123 45 67") },
-                supportingText = phoneHint,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fieldBorder(),
                 shape = RoundedCornerShape(18.dp),
                 colors = fieldColors(),
                 visualTransformation = PhoneVisualTransformation,
@@ -196,17 +210,25 @@ fun ProfileScreen(
                 ),
                 keyboardActions = KeyboardActions(onDone = { save() }),
             )
+            AnimatedVisibility(visible = incomplete) {
+                Text(
+                    text = "Raqamni to'liq kiriting: 9 ta raqam",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.hint,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
 
-            if (onBack == null) {
+            if (!quickEdit) {
                 // Tugma faqat biror narsa o'zgarganda chiqadi: o'zgarish bo'lmasa saqlaydigan narsa yo'q
                 AnimatedVisibility(visible = changed) {
                     BigButton(text = "Saqlash", onClick = save, enabled = valid)
                 }
 
                 SectionLabel("Yetkazish va aloqa")
-                SectionCard(padding = 4.dp) {
+                SectionCard(padding = 0.dp) {
                     LinkRow(
-                        icon = Icons.Default.LocationOn,
+                        icon = R.drawable.ic_pin,
                         label = "Yetkazish manzili",
                         value = when {
                             address == null -> "Xaritadan tanlang"
@@ -218,15 +240,14 @@ fun ProfileScreen(
                     )
                     val cafePhone = shop?.phone
                     if (!cafePhone.isNullOrBlank()) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 64.dp, end = 12.dp),
-                            color = scheme.outlineVariant,
-                        )
+                        RowDivider()
                         LinkRow(
-                            icon = Icons.Default.Phone,
+                            icon = R.drawable.ic_phone,
                             label = "Kafe bilan bog'lanish",
                             value = formatPhone(cafePhone),
                             onClick = { dialPhone(context, cafePhone) },
+                            tileContainer = scheme.successContainer,
+                            tileTint = scheme.success,
                         )
                     }
                 }
@@ -234,7 +255,7 @@ fun ProfileScreen(
                 Text(
                     text = "Amora · ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
+                    color = scheme.hint,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -253,17 +274,17 @@ private fun ProfileHeader(profile: Profile?) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(scheme.brandGradient)),
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(scheme.ink),
                 contentAlignment = Alignment.Center,
             ) {
                 if (profile == null) {
                     Icon(
-                        imageVector = Icons.Default.Person,
+                        painter = painterResource(R.drawable.ic_user),
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(30.dp),
+                        modifier = Modifier.size(26.dp),
                     )
                 } else {
                     Text(
@@ -293,15 +314,6 @@ private fun ProfileHeader(profile: Profile?) {
             }
         }
     }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(start = 4.dp, top = 8.dp),
-    )
 }
 
 /** Telefon ilovasini raqam terilgan holda ochadi (qo'ng'iroqni mijoz o'zi boshlaydi). */

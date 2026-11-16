@@ -81,7 +81,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
@@ -95,6 +94,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Shisha (glass) panellar ortidagi kontentni xiralashtirish uchun
+    implementation("dev.chrisbanes.haze:haze:1.1.1")
 
     testImplementation("junit:junit:4.13.2")
 }
