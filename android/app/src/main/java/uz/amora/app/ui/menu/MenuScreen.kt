@@ -468,7 +468,7 @@ private fun MenuContent(
     // Bo'lim tugmasi bosilganda aynan o'sha bo'lim belgilanadi (ro'yxat u yergacha surila olmasa ham).
     // Mijoz ro'yxatni o'zi sura boshlashi bilan yana surilish joyiga qarab aniqlanadi.
     var tappedSection by remember(headerIndexes) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(gridState) {
+    LaunchedEffect(gridState, headerIndexes) {
         gridState.interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Start) tappedSection = null
         }

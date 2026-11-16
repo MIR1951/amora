@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -144,7 +145,9 @@ fun CartScreen(
 
     val active = cart.isNotEmpty() && createdOrderId == null
     // Klaviatura ochiq paytda pastki tugma yashirinadi: yozilayotgan izoh uning ortida qolib ketmaydi
-    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val ime = WindowInsets.ime
+    val density = LocalDensity.current
+    val keyboardOpen by remember(ime, density) { derivedStateOf { ime.getBottom(density) > 0 } }
     val docked = active && !keyboardOpen
 
     Scaffold(
