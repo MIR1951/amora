@@ -9,6 +9,7 @@ import httpx
 import pytest
 import uvicorn
 from sqlalchemy import select, update
+from sqlalchemy.engine import make_url
 
 from app.api.events import client_message, event_stream
 from app.db import make_session_factory
@@ -175,6 +176,28 @@ async def test_change_inside_rolled_back_savepoint_does_not_swallow_the_next_one
     await assert_silent(subscription)
 
 
+async def test_change_only_inside_rolled_back_savepoint_is_not_published(live, seed):
+    _, factory, subscription = live
+    async with factory() as session:
+        product = await session.get(Product, seed["osh"])
+        savepoint = await session.begin_nested()
+        product.is_available = False
+        await session.flush()
+        await savepoint.rollback()
+        session.add(Customer(name="Ali", phone="+998900000001", token_hash="h1"))
+        await session.commit()  # saqlangan narsa menyuga aloqasi yo'q
+    await assert_silent(subscription)
+
+    async with factory() as session:
+        product = await session.get(Product, seed["osh"])
+        outer = await session.begin_nested()
+        async with session.begin_nested():
+            product.is_available = False  # ichki savepoint saqlandi...
+        await outer.rollback()  # ...lekin uni o'z ichiga olgani bekor qilindi
+        await session.commit()
+    await assert_silent(subscription)
+
+
 async def test_released_savepoint_publishes_only_after_outer_commit(live, seed):
     _, factory, subscription = live
     async with factory() as session:
@@ -267,6 +290,28 @@ def test_asyncpg_connect_args_keep_credentials_and_url_options():
     assert args["timeout"] == "3"
     assert "prepared_statement_cache_size" not in args
     assert "port" not in args
+    # Server manzili so'rov qismida berilishi ham mumkin: asosiy ulanish buni tushunadi
+    args = asyncpg_connect_args("postgresql+asyncpg://amora@/amora?host=10.0.0.5:6432")
+    assert (args["host"], args["port"]) == ("10.0.0.5", 6432)
+
+
+@pytest.mark.skipif(not IS_POSTGRES, reason="faqat PostgreSQL bilan")
+async def test_listener_connects_with_host_given_in_query():
+    url = make_url(TEST_DATABASE_URL)
+    query_url = url.set(host=None, port=None).update_query_dict(
+        {"host": f"{url.host}:{url.port or 5432}"}
+    )
+    hub = EventHub()
+    subscription = hub.subscribe()
+    listener = asyncio.create_task(
+        listen_forever(query_url.render_as_string(hide_password=False), hub)
+    )
+    try:
+        assert await next_event(subscription) == Event(RESYNC)  # kanalga ulandi
+    finally:
+        listener.cancel()
+        with suppress(asyncio.CancelledError):
+            await listener
 
 
 async def test_slow_subscriber_gets_resync_instead_of_growing_queue():

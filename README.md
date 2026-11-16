@@ -105,7 +105,9 @@ Baza jadvallari birinchi ishga tushishda o'zi yaratiladi. Sinov uchun namuna men
 docker compose exec api python -m app.seed
 ```
 
-Server faqat `127.0.0.1:8000` da ochiladi. Tashqariga chiqarish uchun oldiga nginx qo'yib, HTTPS sertifikat (Let's Encrypt) ulash kerak. Mobil ilova faqat HTTPS manzil bilan ishlaydi.
+Server faqat `127.0.0.1:8000` da ochiladi. Tashqariga chiqarish uchun oldiga proksi (Caddy yoki nginx) qo'yib, HTTPS sertifikat (Let's Encrypt) ulash kerak. Mobil ilova faqat HTTPS manzil bilan ishlaydi.
+
+Server mijozning manzilini proksi yuborgan `X-Forwarded-For` sarlavhasining birinchi yozuvidan oladi: ro'yxatdan o'tish va jonli ulanishlar soni shu manzil bo'yicha cheklanadi. Shuning uchun proksi bu sarlavhani mijoz yuborganiga qo'shib emas, o'zi qaytadan yozishi kerak. Caddy (2.5 va keyingi) buni o'zi qiladi. nginx'da `proxy_set_header X-Forwarded-For $remote_addr;` yozilishi kerak (`$proxy_add_x_forwarded_for` emas): aks holda bitta kompyuter sarlavhani soxtalashtirib, cheklovni chetlab o'tishi mumkin.
 
 Yangilash:
 

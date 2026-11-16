@@ -43,6 +43,7 @@ ORDER = "order"  # bitta buyurtmaning holati o'zgardi
 RESYNC = "resync"  # ba'zi hodisalar o'tkazib yuborilgan bo'lishi mumkin: hammasini qayta o'qing
 
 _PENDING = "amora_pending_events"
+_SNAPSHOTS = "amora_pending_snapshots"
 
 
 @dataclass(frozen=True)
@@ -332,11 +333,28 @@ def attach_event_hooks(sync_maker: sessionmaker, hub: EventHub | None = None) ->
         for item in pending.values():
             hub.publish(item)
 
+    # PostgreSQL bo'lmagan bazada savepoint'ni baza o'zi hisobga olmaydi: har bir savepoint
+    # ochilganda navbatdagi hodisalar eslab qolinadi va u bekor qilinsa, o'shalarga qaytiladi
+    @event.listens_for(sync_maker, "after_transaction_create")
+    def _after_transaction_create(session: Session, transaction) -> None:
+        if transaction.nested:
+            snapshots = session.info.setdefault(_SNAPSHOTS, {})
+            snapshots[transaction] = dict(session.info.get(_PENDING, {}))
+
+    @event.listens_for(sync_maker, "after_soft_rollback")
+    def _after_soft_rollback(session: Session, previous_transaction) -> None:
+        # `after_transaction_end` dan keyin keladi, shuning uchun eslab qolingani shu yerda olinadi.
+        # Saqlangan (release) savepoint'larniki tashqi tranzaksiya tugaguncha qolaveradi.
+        snapshot = session.info.get(_SNAPSHOTS, {}).pop(previous_transaction, None)
+        if snapshot is not None:
+            session.info[_PENDING] = snapshot
+
     @event.listens_for(sync_maker, "after_transaction_end")
     def _after_transaction_end(session: Session, transaction) -> None:
         # Saqlanmay yopilgan tranzaksiyaning hodisalari keyingisiga o'tib ketmasin
         if transaction.parent is None:
             session.info.pop(_PENDING, None)
+            session.info.pop(_SNAPSHOTS, None)
 
 
 # ---------- PostgreSQL kanalini tinglash ----------
@@ -354,12 +372,13 @@ _SQLALCHEMY_ONLY = (
 def asyncpg_connect_args(database_url: str) -> dict:
     """`postgresql+asyncpg://...` manzilidan `asyncpg.connect` uchun parametrlar yasaydi.
 
-    Manzil oxiridagi `?ssl=require` kabi sozlamalar ham xuddi SQLAlchemy uzatganidek uzatiladi:
-    aks holda baza bilan asosiy aloqa ishlab, tinglovchi ulanolmay qolishi mumkin edi.
+    Manzilni SQLAlchemy'ning o'zi tarjima qiladi: `?ssl=require`, `?host=...` kabi sozlamalar
+    asosiy ulanishdagidek tushuniladi. Aks holda baza bilan asosiy aloqa ishlab, tinglovchi
+    ulanolmay qolishi mumkin edi.
     """
-    url = make_url(database_url)
-    args: dict = url.translate_connect_args(username="user")
-    args.update(url.query)
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+
+    _, args = PGDialect_asyncpg().create_connect_args(make_url(database_url))
     for key in _SQLALCHEMY_ONLY:
         args.pop(key, None)
     args.setdefault("timeout", 10)
