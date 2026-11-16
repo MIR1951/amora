@@ -1,30 +1,28 @@
 package uz.amora.app.ui.cart
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -44,7 +42,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,18 +55,30 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import uz.amora.app.AppContainer
 import uz.amora.app.R
 import uz.amora.app.data.resolveImageUrl
-import uz.amora.app.ui.components.BackTopBar
 import uz.amora.app.ui.components.BigButton
-import uz.amora.app.ui.components.BottomActionBar
-import uz.amora.app.ui.components.IconBadge
+import uz.amora.app.ui.components.BottomDock
+import uz.amora.app.ui.components.ConfirmDialog
+import uz.amora.app.ui.components.DashedDivider
+import uz.amora.app.ui.components.GlassTopBar
+import uz.amora.app.ui.components.IconTile
 import uz.amora.app.ui.components.LinkRow
 import uz.amora.app.ui.components.LoadingBox
 import uz.amora.app.ui.components.MessageBox
+import uz.amora.app.ui.components.PriceText
 import uz.amora.app.ui.components.ProductImage
 import uz.amora.app.ui.components.QuantityStepper
+import uz.amora.app.ui.components.RowDivider
 import uz.amora.app.ui.components.SectionCard
+import uz.amora.app.ui.components.SectionLabel
+import uz.amora.app.ui.components.SkeletonBox
 import uz.amora.app.ui.components.SummaryRow
 import uz.amora.app.ui.components.fieldColors
+import uz.amora.app.ui.components.glassSource
+import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.theme.PriceLargeStyle
+import uz.amora.app.ui.theme.hint
+import uz.amora.app.ui.theme.info
+import uz.amora.app.ui.theme.infoContainer
 import uz.amora.app.ui.theme.success
 import uz.amora.app.ui.theme.successContainer
 import uz.amora.app.util.formatPhone
@@ -91,6 +103,7 @@ fun CartScreen(
     val menu = catalog.menu
     val shop = catalog.shop
     val scheme = MaterialTheme.colorScheme
+    val glass = rememberGlassState()
 
     val snackbar = remember { SnackbarHostState() }
     var confirming by rememberSaveable { mutableStateOf(false) }
@@ -118,6 +131,8 @@ fun CartScreen(
     }
     val itemsTotal = quote?.itemsTotal ?: localItemsTotal
     val canOrder = quote != null && quote.canOrder && !state.quoteLoading && state.quoteError == null
+    // Summa birinchi marta serverdan kutilayotganda raqamlar o'rnida skelet ko'rinadi
+    val quotePending = quote == null && state.quoteError == null
 
     // "Bepul yetkazishgacha yana ..." qatori: kafe shunday chegara qo'ygan bo'lsa va
     // server hisoblagan yetkazish narxi bunga zid kelmasa ko'rinadi
@@ -125,33 +140,34 @@ fun CartScreen(
     val showFreeDelivery = shop != null && shop.deliveryFee > 0 && freeFrom != null && freeFrom > 0 &&
         (quote == null || (quote.deliveryFee == 0) == (itemsTotal >= freeFrom))
 
+    val active = cart.isNotEmpty() && createdOrderId == null
+
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = scheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            BackTopBar(
+            GlassTopBar(
+                glass = glass,
                 title = "Savat",
                 onBack = onBack,
                 actions = {
-                    if (cart.isNotEmpty() && createdOrderId == null) {
-                        TextButton(
-                            onClick = { container.cart.clear() },
-                            modifier = Modifier.padding(end = 8.dp),
-                        ) {
+                    if (active) {
+                        TextButton(onClick = { container.cart.clear() }) {
                             Text(
                                 text = "Tozalash",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = scheme.onSurfaceVariant,
+                                color = scheme.primary,
                             )
                         }
                     }
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, modifier = Modifier.navigationBarsPadding()) },
         bottomBar = {
-            if (cart.isNotEmpty() && createdOrderId == null) {
-                BottomActionBar {
+            if (active) {
+                BottomDock(glass = glass) {
                     when {
                         address == null -> BigButton(text = "Manzilni tanlang", onClick = onPickAddress)
 
@@ -161,14 +177,11 @@ fun CartScreen(
                         )
 
                         else -> BigButton(
-                            text = if (quote != null) {
-                                "Buyurtma berish · ${formatSum(quote.total)}"
-                            } else {
-                                "Buyurtma berish"
-                            },
+                            text = "Buyurtma berish",
                             onClick = { confirming = true },
                             enabled = canOrder,
                             loading = state.submitting,
+                            trailing = quote?.let { formatSum(it.total) },
                         )
                     }
                 }
@@ -179,19 +192,27 @@ fun CartScreen(
             createdOrderId != null -> LoadingBox(Modifier.padding(padding))
 
             cart.isEmpty() -> MessageBox(
-                icon = Icons.Default.ShoppingCart,
+                icon = R.drawable.ic_bag,
                 title = "Savat bo'sh",
                 text = "Menyudan yoqqan taomingizni tanlang",
                 actionLabel = "Menyuga qaytish",
                 onAction = onBack,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier
+                    .glassSource(glass)
+                    .padding(padding)
+                    .navigationBarsPadding(),
             )
 
             else -> LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 20.dp),
+                    .glassSource(glass),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding() + 8.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (showFreeDelivery && freeFrom != null) {
@@ -201,19 +222,15 @@ fun CartScreen(
                 }
 
                 item(key = "items") {
-                    SectionCard(padding = 14.dp) {
+                    SectionCard(padding = 0.dp) {
                         cart.entries.forEachIndexed { index, entry ->
                             val productId = entry.key
                             val quantity = entry.value
                             val product = productsById[productId]
                             val line = quoteLines[productId]
-                            if (index > 0) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(vertical = 12.dp),
-                                    color = scheme.outlineVariant,
-                                )
-                            }
+                            if (index > 0) RowDivider(inset = 16.dp)
                             CartLine(
+                                productId = productId,
                                 name = line?.name ?: product?.name ?: "Taom",
                                 lineTotal = (line?.price ?: product?.price ?: 0) * quantity,
                                 imageUrl = resolveImageUrl(container.baseUrl, product?.imageUrl),
@@ -226,10 +243,14 @@ fun CartScreen(
                     }
                 }
 
+                item(key = "delivery-label") {
+                    SectionLabel("Yetkazish")
+                }
+
                 item(key = "delivery") {
-                    SectionCard(padding = 4.dp) {
+                    SectionCard(padding = 0.dp) {
                         LinkRow(
-                            icon = Icons.Default.LocationOn,
+                            icon = R.drawable.ic_pin,
                             label = "Yetkazish manzili",
                             value = when {
                                 address == null -> "Xaritadan tanlang"
@@ -239,12 +260,9 @@ fun CartScreen(
                             highlighted = address == null,
                             onClick = onPickAddress,
                         )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 64.dp, end = 12.dp),
-                            color = scheme.outlineVariant,
-                        )
+                        RowDivider()
                         LinkRow(
-                            icon = Icons.Default.Person,
+                            icon = R.drawable.ic_user,
                             label = "Qabul qiluvchi",
                             value = if (profile == null) {
                                 "Ism va telefon raqamni kiriting"
@@ -253,22 +271,31 @@ fun CartScreen(
                             },
                             highlighted = profile == null,
                             onClick = onEditProfile,
+                            tileContainer = scheme.infoContainer,
+                            tileTint = scheme.info,
                         )
+                        RowDivider()
+                        Row(
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconTile(
+                                icon = R.drawable.ic_message,
+                                container = scheme.surfaceVariant,
+                                tint = scheme.onSurfaceVariant,
+                            )
+                            TextField(
+                                value = state.comment,
+                                onValueChange = { vm.setComment(it) },
+                                placeholder = { Text("Kafe uchun izoh (ixtiyoriy)") },
+                                modifier = Modifier.weight(1f),
+                                maxLines = 4,
+                                textStyle = MaterialTheme.typography.bodyLarge,
+                                colors = fieldColors(Color.Transparent),
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                            )
+                        }
                     }
-                }
-
-                item(key = "comment") {
-                    TextField(
-                        value = state.comment,
-                        onValueChange = { vm.setComment(it) },
-                        placeholder = { Text("Kafe uchun izoh (ixtiyoriy)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        maxLines = 4,
-                        shape = MaterialTheme.shapes.large,
-                        colors = fieldColors(),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    )
                 }
 
                 if (generalProblems.isNotEmpty()) {
@@ -298,28 +325,56 @@ fun CartScreen(
                                 quote.deliveryFee == 0 -> "Bepul"
                                 else -> formatSum(quote.deliveryFee)
                             },
-                            valueColor = if (quote != null && quote.deliveryFee == 0) scheme.success else scheme.onSurface,
-                        )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = scheme.outlineVariant,
-                        )
-                        SummaryRow(
-                            "Jami",
-                            if (quote == null) "—" else formatSum(quote.total),
-                            strong = true,
+                            valueColor = if (quote != null && quote.deliveryFee == 0) {
+                                scheme.success
+                            } else {
+                                Color.Unspecified
+                            },
+                            loading = quotePending,
                         )
                         Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "To'lov: kuryerga naqd pul bilan",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = scheme.onSurfaceVariant,
+                        DashedDivider()
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Jami",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            when {
+                                quote != null -> PriceText(
+                                    amount = quote.total,
+                                    style = PriceLargeStyle,
+                                    unitColor = scheme.onSurface,
+                                )
+
+                                quotePending -> SkeletonBox(modifier = Modifier.size(width = 116.dp, height = 24.dp))
+
+                                else -> Text("—", style = PriceLargeStyle)
+                            }
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(scheme.surfaceVariant)
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                        )
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_cash),
+                                contentDescription = null,
+                                tint = scheme.success,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = "To'lov: kuryerga naqd pul bilan",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = scheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -327,30 +382,16 @@ fun CartScreen(
     }
 
     if (confirming && quote != null) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            containerColor = scheme.surface,
-            title = { Text("Buyurtmani tasdiqlaysizmi?", style = MaterialTheme.typography.titleLarge) },
-            text = {
-                Text(
-                    text = "Jami: ${formatSum(quote.total)}. To'lov kuryerga naqd pul bilan beriladi.",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+        ConfirmDialog(
+            title = "Buyurtmani tasdiqlaysizmi?",
+            text = "Jami: ${formatSum(quote.total)}. To'lov kuryerga naqd pul bilan beriladi.",
+            confirmLabel = "Tasdiqlash",
+            dismissLabel = "Orqaga",
+            onConfirm = {
+                confirming = false
+                vm.submit()
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirming = false
-                        vm.submit()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                ) { Text("Tasdiqlash", style = MaterialTheme.typography.labelLarge) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = false }) {
-                    Text("Orqaga", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
-                }
-            },
+            onDismiss = { confirming = false },
         )
     }
 }
@@ -360,21 +401,19 @@ fun CartScreen(
 private fun FreeDeliveryCard(itemsTotal: Int, freeFrom: Int) {
     val scheme = MaterialTheme.colorScheme
     val reached = itemsTotal >= freeFrom
-    val fraction = (itemsTotal.toFloat() / freeFrom).coerceIn(0f, 1f)
+    val fraction by animateFloatAsState(
+        targetValue = (itemsTotal.toFloat() / freeFrom).coerceIn(0f, 1f),
+        animationSpec = tween(500),
+        label = "free-delivery",
+    )
     val accent = if (reached) scheme.success else scheme.primary
     SectionCard(padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconBadge(
-                size = 40.dp,
+            IconTile(
+                icon = R.drawable.ic_bike,
                 container = if (reached) scheme.successContainer else scheme.primaryContainer,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_scooter),
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
+                tint = accent,
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -408,6 +447,7 @@ private fun FreeDeliveryCard(itemsTotal: Int, freeFrom: Int) {
 
 @Composable
 private fun CartLine(
+    productId: Int,
     name: String,
     lineTotal: Int,
     imageUrl: String?,
@@ -416,19 +456,24 @@ private fun CartLine(
     onMinus: () -> Unit,
     onPlus: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         ProductImage(
             url = imageUrl,
             modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(16.dp)),
+                .size(58.dp)
+                .clip(RoundedCornerShape(17.dp)),
             iconSize = 28.dp,
+            seed = productId,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = name,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -436,13 +481,13 @@ private fun CartLine(
             Text(
                 text = formatSum(lineTotal),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = scheme.hint,
             )
             if (problem != null) {
                 Text(
                     text = problem,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
+                    color = scheme.error,
                 )
             }
         }
@@ -451,9 +496,9 @@ private fun CartLine(
             quantity = quantity,
             onMinus = onMinus,
             onPlus = onPlus,
-            modifier = Modifier.width(112.dp),
             height = 40.dp,
-            corner = 13.dp,
+            corner = 14.dp,
+            buttonWidth = 36.dp,
             tonal = true,
         )
     }
@@ -481,9 +526,14 @@ private fun NoticeCard(message: String, actionLabel: String? = null, onAction: (
                     .padding(vertical = 6.dp),
             )
             if (actionLabel != null && onAction != null) {
-                TextButton(onClick = onAction) {
-                    Text(actionLabel, style = MaterialTheme.typography.labelLarge)
-                }
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(role = Role.Button, onClick = onAction)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
             }
         }
     }

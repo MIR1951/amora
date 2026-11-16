@@ -1,24 +1,31 @@
 package uz.amora.app.ui.menu
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,15 +44,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,12 +52,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,22 +67,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,28 +90,49 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
-import uz.amora.app.data.Address
+import uz.amora.app.R
 import uz.amora.app.data.Menu
 import uz.amora.app.data.Order
 import uz.amora.app.data.Product
 import uz.amora.app.data.Shop
 import uz.amora.app.data.resolveImageUrl
+import uz.amora.app.ui.components.AddButton
 import uz.amora.app.ui.components.BigButton
-import uz.amora.app.ui.components.CircleIconButton
-import uz.amora.app.ui.components.IconBadge
+import uz.amora.app.ui.components.BlurBehindEffect
+import uz.amora.app.ui.components.GlassBox
+import uz.amora.app.ui.components.GlassFade
+import uz.amora.app.ui.components.GlassStrip
+import uz.amora.app.ui.components.GlassTone
+import uz.amora.app.ui.components.IconTile
+import uz.amora.app.ui.components.LogoTile
 import uz.amora.app.ui.components.MessageBox
 import uz.amora.app.ui.components.OrderProgressBar
-import uz.amora.app.ui.components.OrderStatusIcon
-import uz.amora.app.ui.components.PriceAddButton
+import uz.amora.app.ui.components.PriceText
 import uz.amora.app.ui.components.ProductImage
 import uz.amora.app.ui.components.QuantityStepper
+import uz.amora.app.ui.components.RefreshBox
+import uz.amora.app.ui.components.RoundButton
+import uz.amora.app.ui.components.SectionCard
 import uz.amora.app.ui.components.SkeletonBox
+import uz.amora.app.ui.components.TabChip
+import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
-import uz.amora.app.ui.profile.dialPhone
-import uz.amora.app.ui.theme.brandGradient
+import uz.amora.app.ui.components.glassSource
+import uz.amora.app.ui.components.pressScale
+import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.components.softShadow
+import uz.amora.app.ui.components.statusIcon
+import uz.amora.app.ui.theme.PriceStyle
+import uz.amora.app.ui.theme.amber
+import uz.amora.app.ui.theme.hint
+import uz.amora.app.ui.theme.ink
+import uz.amora.app.ui.theme.onInkMuted
+import uz.amora.app.ui.theme.success
+import uz.amora.app.util.formatNumber
 import uz.amora.app.util.formatSum
 
 private const val ACTIVE_ORDERS_REFRESH_MS = 15_000L
@@ -122,7 +141,10 @@ private const val ACTIVE_ORDERS_REFRESH_MS = 15_000L
 private const val SEARCH_MIN_PRODUCTS = 6
 
 // Ro'yxat tepasida qotib turadigan bo'limlar qatorining balandligi
-private val PINNED_CHIPS_HEIGHT = 56.dp
+private val PINNED_CHIPS_HEIGHT = 52.dp
+
+// Qotib turgan qator yuqori satrning "tumaniga" shuncha kirib turadi: ikkalasi bitta shishadek ko'rinadi
+private val PINNED_CHIPS_OVERLAP = 18.dp
 
 /** Menyudagi bitta bo'lim: kategoriya va uning taomlari. */
 private data class MenuSection(val id: Int, val title: String, val products: List<Product>)
@@ -149,11 +171,16 @@ private fun searchProducts(menu: Menu, query: String): List<Product> {
     }
 }
 
+/**
+ * Bosh sahifa. Yuqorida kafe va ikki tugma (buyurtmalarim, profil), o'rtada menyu,
+ * savatda taom bo'lsa pastda suzib turadigan shisha "Savat" paneli.
+ */
 @Composable
 fun MenuScreen(
     container: AppContainer,
     onOpenCart: () -> Unit,
-    onPickAddress: () -> Unit,
+    onOpenOrders: () -> Unit,
+    onOpenProfile: () -> Unit,
     onOpenOrder: (Int) -> Unit,
 ) {
     val vm: MenuViewModel = viewModel(
@@ -161,10 +188,9 @@ fun MenuScreen(
     )
     val catalog by container.catalog.state.collectAsStateWithLifecycle()
     val cart by container.cart.items.collectAsStateWithLifecycle()
-    val address by container.session.address.collectAsStateWithLifecycle()
     val activeOrders by vm.activeOrders.collectAsStateWithLifecycle()
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
-    val context = LocalContext.current
+    val glass = rememberGlassState()
 
     // Ekran ko'rinib turganda menyu yangilanadi va faol buyurtmalar tekshirib turiladi
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -198,62 +224,74 @@ fun MenuScreen(
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             HomeTopBar(
-                address = address,
-                cafePhone = shop?.phone,
-                onPickAddress = onPickAddress,
-                onCall = { dialPhone(context, it) },
+                glass = glass,
+                shop = shop,
+                hasActiveOrders = activeOrders.isNotEmpty(),
+                onOpenOrders = onOpenOrders,
+                onOpenProfile = onOpenProfile,
             )
         },
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            PullToRefreshBox(
-                isRefreshing = refreshing,
-                onRefresh = { vm.pullToRefresh() },
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                when {
-                    menu == null && catalog.loading -> MenuSkeleton()
-
-                    menu == null -> MessageBox(
-                        icon = Icons.Default.Refresh,
-                        title = "Menyu yuklanmadi",
-                        text = catalog.error,
-                        actionLabel = "Qayta urinish",
-                        onAction = { vm.retry() },
-                    )
-
-                    else -> MenuContent(
-                        shop = shop,
-                        menu = menu,
-                        sections = sections,
-                        query = query,
-                        onQueryChange = { query = it },
-                        cart = cart,
-                        activeOrders = activeOrders,
-                        baseUrl = container.baseUrl,
-                        bottomSpace = if (cartCount > 0) 100.dp else 24.dp,
-                        onAdd = { container.cart.add(it) },
-                        onRemove = { container.cart.remove(it) },
-                        onOpenProduct = { selectedProductId = it },
-                        onOpenOrder = onOpenOrder,
-                    )
+        bottomBar = {
+            // Savat bo'sh bo'lsa ham shu joy tizim tugmalari balandligini egallab turadi
+            Box(modifier = Modifier.navigationBarsPadding()) {
+                AnimatedVisibility(
+                    visible = cartCount > 0,
+                    enter = slideInVertically(tween(320)) { it } + fadeIn(tween(320)),
+                    exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(240)),
+                ) {
+                    CartBar(glass = glass, count = cartCount, total = cartTotal, onClick = onOpenCart)
                 }
             }
+        },
+    ) { padding ->
+        val top = padding.calculateTopPadding()
+        val bottom = padding.calculateBottomPadding()
+        when {
+            menu == null && catalog.loading -> MenuSkeleton(
+                modifier = Modifier.glassSource(glass),
+                top = top,
+            )
 
-            androidx.compose.animation.AnimatedVisibility(
-                visible = cartCount > 0,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+            menu == null -> RefreshBox(
+                refreshing = refreshing,
+                onRefresh = { vm.pullToRefresh() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .glassSource(glass),
+                indicatorTop = top,
             ) {
-                CartBar(count = cartCount, total = cartTotal, onClick = onOpenCart)
+                MessageBox(
+                    icon = R.drawable.ic_refresh,
+                    title = "Menyu yuklanmadi",
+                    text = catalog.error,
+                    actionLabel = "Qayta urinish",
+                    onAction = { vm.retry() },
+                    modifier = Modifier.padding(top = top, bottom = bottom),
+                )
             }
+
+            else -> MenuContent(
+                glass = glass,
+                shop = shop,
+                menu = menu,
+                sections = sections,
+                query = query,
+                onQueryChange = { query = it },
+                cart = cart,
+                activeOrders = activeOrders,
+                baseUrl = container.baseUrl,
+                top = top,
+                bottom = bottom,
+                refreshing = refreshing,
+                onRefresh = { vm.pullToRefresh() },
+                onAdd = { container.cart.add(it) },
+                onRemove = { container.cart.remove(it) },
+                onOpenProduct = { selectedProductId = it },
+                onOpenOrder = onOpenOrder,
+            )
         }
     }
 
@@ -270,100 +308,90 @@ fun MenuScreen(
     }
 }
 
-/** Yuqori satr: yetkazish manzili (bosilsa xarita ochiladi) va kafega qo'ng'iroq tugmasi. */
-@Composable
-private fun HomeTopBar(
-    address: Address?,
-    cafePhone: String?,
-    onPickAddress: () -> Unit,
-    onCall: (String) -> Unit,
-) {
-    val scheme = MaterialTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(scheme.background)
-            .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(16.dp))
-                .clickable(onClickLabel = "Manzilni o'zgartirish", onClick = onPickAddress)
-                .padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconBadge(size = 44.dp) {
-                Icon(
-                    imageVector = Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = scheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Yetkazish manzili",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = scheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = when {
-                            address == null -> "Manzilni belgilang"
-                            address.note.isBlank() -> "Xaritada belgilangan joy"
-                            else -> address.note
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-        }
-        if (!cafePhone.isNullOrBlank()) {
-            Spacer(Modifier.width(12.dp))
-            CircleIconButton(
-                icon = Icons.Default.Phone,
-                label = "Kafega qo'ng'iroq qilish",
-                onClick = { onCall(cafePhone) },
-            )
-        }
-    }
-}
-
 private fun shopStatusLine(shop: Shop): String = when {
     !shop.isAcceptingOrders -> "Hozir buyurtma qabul qilinmayapti"
-    !shop.isOpen -> "Yopiq · ish vaqti ${shop.openTime}–${shop.closeTime}"
+    !shop.isOpen -> "Yopiq · ${shop.openTime}–${shop.closeTime}"
     shop.openTime == shop.closeTime -> "Ochiq · kecha-kunduz"
     else -> "Ochiq · ${shop.openTime}–${shop.closeTime}"
 }
 
-/** Kafe kartochkasidagi qisqa yozuvlar: yetkazish narxi, bepul yetkazish chegarasi, eng kam buyurtma. */
-private fun deliveryFacts(shop: Shop): List<String> {
-    val facts = ArrayList<String>()
-    if (shop.deliveryFee <= 0) {
-        facts.add("Yetkazish bepul")
-    } else {
-        facts.add("Yetkazish ${formatSum(shop.deliveryFee)}")
-        val freeFrom = shop.freeDeliveryFrom
-        if (freeFrom != null) facts.add("${formatSum(freeFrom)}dan bepul")
+/** Yuqori satr: kafe nomi va holati, o'ngda "Buyurtmalarim" va "Profil" tugmalari. */
+@Composable
+private fun HomeTopBar(
+    glass: HazeState,
+    shop: Shop?,
+    hasActiveOrders: Boolean,
+    onOpenOrders: () -> Unit,
+    onOpenProfile: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val name = shop?.cafeName?.takeIf { it.isNotBlank() } ?: "Amora"
+    Box {
+        GlassStrip(glass = glass, modifier = Modifier.matchParentSize(), fade = GlassFade.Bottom)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LogoTile(letter = name.take(1).uppercase())
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (shop != null) {
+                    val open = shop.isOpen && shop.isAcceptingOrders
+                    val color = if (open) scheme.success else scheme.hint
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(color),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = shopStatusLine(shop),
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
+                            color = color,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Box {
+                RoundButton(icon = R.drawable.ic_receipt, label = "Buyurtmalarim", onClick = onOpenOrders)
+                if (hasActiveOrders) {
+                    // Faol buyurtma borligini bildiruvchi nuqta
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-2).dp, y = 2.dp)
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(scheme.background)
+                            .padding(2.dp)
+                            .clip(CircleShape)
+                            .background(scheme.primary),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            RoundButton(icon = R.drawable.ic_user, label = "Profil", onClick = onOpenProfile)
+        }
     }
-    if (shop.minOrderAmount > 0) facts.add("Eng kam buyurtma ${formatSum(shop.minOrderAmount)}")
-    return facts
 }
 
 @Composable
 private fun MenuContent(
+    glass: HazeState,
     shop: Shop?,
     menu: Menu,
     sections: List<MenuSection>,
@@ -372,7 +400,10 @@ private fun MenuContent(
     cart: Map<Int, Int>,
     activeOrders: List<Order>,
     baseUrl: String,
-    bottomSpace: Dp,
+    top: Dp,
+    bottom: Dp,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
     onAdd: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onOpenProduct: (Int) -> Unit,
@@ -402,9 +433,9 @@ private fun MenuContent(
     val leading = remember(showSearch, hasOrders, closed, showChips) {
         buildList {
             add("hero")
-            if (showSearch) add("search")
             if (hasOrders) add("orders")
             if (closed) add("closed")
+            if (showSearch) add("search")
             if (showChips) add("chips")
         }
     }
@@ -418,18 +449,25 @@ private fun MenuContent(
         }
         indexes
     }
+    // Ro'yxatdagi element joylashuvi yuqori satr ostidagi chiziqdan hisoblanadi (0 = satr osti)
     val currentSection by remember(headerIndexes, pinnedChipsPx) {
         derivedStateOf {
             // Qotib turgan bo'limlar qatori ostidan ko'rinib turgan birinchi element qaysi bo'limda?
-            val info = gridState.layoutInfo
-            val edge = info.viewportStartOffset + pinnedChipsPx
-            val first = info.visibleItemsInfo.firstOrNull { it.offset.y + it.size.height > edge }
+            val first = gridState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.offset.y + it.size.height > pinnedChipsPx }
             val index = first?.index ?: gridState.firstVisibleItemIndex
             headerIndexes.indexOfLast { it <= index }.coerceAtLeast(0)
         }
     }
     val chipsPinned by remember(chipsIndex) {
-        derivedStateOf { chipsIndex >= 0 && gridState.firstVisibleItemIndex > chipsIndex }
+        derivedStateOf {
+            if (chipsIndex < 0) {
+                false
+            } else {
+                val item = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == chipsIndex }
+                if (item != null) item.offset.y < 0 else gridState.firstVisibleItemIndex > chipsIndex
+            }
+        }
     }
     val selectSection: (Int) -> Unit = { index ->
         val target = headerIndexes.getOrNull(index)
@@ -439,89 +477,104 @@ private fun MenuContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 156.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = bottomSpace),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        RefreshBox(
+            refreshing = refreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .glassSource(glass),
+            indicatorTop = top,
         ) {
-            for (block in leading) {
-                item(key = block, span = { GridItemSpan(maxLineSpan) }, contentType = block) {
-                    when (block) {
-                        "hero" -> ShopHero(shop)
-                        "search" -> SearchField(query = query, onChange = onQueryChange)
-                        "orders" -> ActiveOrders(activeOrders, onOpenOrder)
-                        "closed" -> if (shop != null) ClosedNotice(shop)
-                        "chips" -> CategoryChips(
-                            sections = sections,
-                            selectedIndex = currentSection,
-                            onSelect = selectSection,
-                            modifier = Modifier.bleed(16.dp),
-                        )
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 156.dp),
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top, bottom = bottom + 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                for (block in leading) {
+                    item(key = block, span = { GridItemSpan(maxLineSpan) }, contentType = block) {
+                        when (block) {
+                            "hero" -> ShopHero(shop)
+                            "search" -> SearchField(query = query, onChange = onQueryChange)
+                            "orders" -> ActiveOrders(activeOrders, onOpenOrder)
+                            "closed" -> if (shop != null) ClosedNotice(shop)
+                            "chips" -> CategoryChips(
+                                sections = sections,
+                                selectedIndex = currentSection,
+                                onSelect = selectSection,
+                                modifier = Modifier.bleed(16.dp),
+                            )
+                        }
                     }
                 }
-            }
 
-            if (shownSections.isEmpty()) {
-                item(key = "empty", span = { GridItemSpan(maxLineSpan) }, contentType = "empty") {
-                    if (searching) {
-                        EmptyHint(
-                            icon = Icons.Default.Search,
-                            title = "Hech narsa topilmadi",
-                            text = "Boshqa so'z bilan qidirib ko'ring",
-                        )
-                    } else {
-                        EmptyHint(
-                            icon = Icons.Default.Info,
-                            title = "Menyu hozircha bo'sh",
-                            text = "Taomlar tez orada qo'shiladi",
-                        )
+                if (shownSections.isEmpty()) {
+                    item(key = "empty", span = { GridItemSpan(maxLineSpan) }, contentType = "empty") {
+                        if (searching) {
+                            EmptyHint(
+                                icon = R.drawable.ic_search,
+                                title = "Hech narsa topilmadi",
+                                text = "Boshqa so'z bilan qidirib ko'ring",
+                            )
+                        } else {
+                            EmptyHint(
+                                icon = R.drawable.ic_info,
+                                title = "Menyu hozircha bo'sh",
+                                text = "Taomlar tez orada qo'shiladi",
+                            )
+                        }
                     }
                 }
-            }
 
-            for (section in shownSections) {
-                item(
-                    key = "section-${section.id}",
-                    span = { GridItemSpan(maxLineSpan) },
-                    contentType = "header",
-                ) {
-                    SectionHeader(title = section.title, count = section.products.size)
-                }
-                items(
-                    items = section.products,
-                    key = { it.id },
-                    contentType = { "product" },
-                ) { product ->
-                    ProductCard(
-                        product = product,
-                        imageUrl = resolveImageUrl(baseUrl, product.imageUrl),
-                        quantity = cart[product.id] ?: 0,
-                        onAdd = { onAdd(product.id) },
-                        onRemove = { onRemove(product.id) },
-                        onClick = { onOpenProduct(product.id) },
-                    )
+                for (section in shownSections) {
+                    item(
+                        key = "section-${section.id}",
+                        span = { GridItemSpan(maxLineSpan) },
+                        contentType = "header",
+                    ) {
+                        SectionHeader(title = section.title, count = section.products.size)
+                    }
+                    items(
+                        items = section.products,
+                        key = { it.id },
+                        contentType = { "product" },
+                    ) { product ->
+                        ProductCard(
+                            product = product,
+                            imageUrl = resolveImageUrl(baseUrl, product.imageUrl),
+                            quantity = cart[product.id] ?: 0,
+                            onAdd = { onAdd(product.id) },
+                            onRemove = { onRemove(product.id) },
+                            onClick = { onOpenProduct(product.id) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
             }
         }
 
-        // Bo'limlar qatori ro'yxat bilan birga surilib ketgach, tepada qotib turadi
-        androidx.compose.animation.AnimatedVisibility(
+        // Bo'limlar qatori ro'yxat bilan birga surilib ketgach, yuqori satr ostida shisha bo'lib qotadi
+        AnimatedVisibility(
             visible = chipsPinned,
-            modifier = Modifier.align(Alignment.TopCenter),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = (top - PINNED_CHIPS_OVERLAP).coerceAtLeast(0.dp)),
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(PINNED_CHIPS_HEIGHT)
-                    .background(MaterialTheme.colorScheme.background),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                CategoryChips(sections = sections, selectedIndex = currentSection, onSelect = selectSection)
+            Box {
+                GlassStrip(glass = glass, modifier = Modifier.matchParentSize(), fade = GlassFade.Bottom)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = PINNED_CHIPS_OVERLAP, bottom = 14.dp)
+                        .height(PINNED_CHIPS_HEIGHT),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    CategoryChips(sections = sections, selectedIndex = currentSection, onSelect = selectSection)
+                }
             }
         }
     }
@@ -536,96 +589,113 @@ private fun Modifier.bleed(horizontal: Dp): Modifier = layout { measurable, cons
     }
 }
 
-/** Kafe kartochkasi: nomi, ochiq-yopiqligi va yetkazish shartlari. */
-@OptIn(ExperimentalLayoutApi::class)
+/** Banner sarlavhasi va izohi: yetkazish shartlari serverdan olinadi. */
+private fun heroLines(shop: Shop?): Pair<String, String> {
+    val warm = "Issiq holda, eshigingizgacha"
+    if (shop == null) return "Mazali taomlar\nuyingizgacha" to warm
+    if (shop.deliveryFee <= 0) return "Yetkazish\nbepul" to warm
+    val freeFrom = shop.freeDeliveryFrom
+    val sub = if (freeFrom != null) "${formatSum(freeFrom)}dan yetkazish bepul" else warm
+    return "Yetkazish\n${formatSum(shop.deliveryFee)}" to sub
+}
+
+/** Ko'mir rangli banner: kafe nomi, yetkazish sharti va o'ngda pitsa rasmi. */
 @Composable
 private fun ShopHero(shop: Shop?) {
     val scheme = MaterialTheme.colorScheme
     val name = shop?.cafeName?.takeIf { it.isNotBlank() } ?: "Amora"
+    val (title, sub) = heroLines(shop)
+    val shape = RoundedCornerShape(28.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(Brush.linearGradient(scheme.brandGradient))
-            .drawBehind {
-                // Fondagi yumshoq doiralar: kartochkaga chuqurlik beradi
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.10f),
-                    radius = size.height * 0.80f,
-                    center = Offset(size.width * 0.95f, size.height * 0.02f),
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.07f),
-                    radius = size.height * 0.50f,
-                    center = Offset(size.width * 0.66f, size.height * 1.12f),
-                )
-            }
-            .padding(20.dp),
+            .height(154.dp)
+            .softShadow(shape, elevation = 14.dp, alpha = 0.22f)
+            .clip(shape)
+            .background(scheme.ink),
     ) {
-        Column {
+        PizzaArt(modifier = Modifier.matchParentSize())
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 18.dp, top = 18.dp, bottom = 14.dp, end = 104.dp),
+        ) {
+            Text(
+                text = name.uppercase(),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp, fontSize = 11.sp),
+                color = Color(0xFFF7B8A8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineLarge.copy(fontSize = 29.sp, lineHeight = 30.sp),
+                color = Color.White,
+                maxLines = 2,
+                modifier = Modifier.weight(1f),
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .background(Color.White),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = name.take(1).uppercase(),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Color(0xFFE8442A),
-                    )
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = name,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (shop != null) {
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (shop.isOpen) Color(0xFF7CF2B4) else Color.White.copy(alpha = 0.6f)),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = shopStatusLine(shop),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color.White.copy(alpha = 0.95f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
+                Icon(
+                    painter = painterResource(R.drawable.ic_bolt),
+                    contentDescription = null,
+                    tint = scheme.amber,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = sub,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onInkMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            if (shop != null) {
-                Spacer(Modifier.height(18.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    for (fact in deliveryFacts(shop)) {
-                        Text(
-                            text = fact,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.18f))
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
-                        )
-                    }
-                }
+        }
+    }
+}
+
+// Pitsa ustidagi kolbasa va rayhon joylari (markazdan, radius ulushida)
+private val PIZZA_SPOTS = listOf(
+    -0.52f to -0.34f,
+    -0.08f to -0.58f,
+    -0.60f to 0.16f,
+    -0.14f to -0.06f,
+    -0.34f to 0.52f,
+    0.12f to 0.40f,
+    0.28f to -0.26f,
+)
+private val PIZZA_LEAVES = listOf(
+    Triple(-0.34f, -0.02f, 30f),
+    Triple(-0.02f, -0.30f, -40f),
+    Triple(-0.12f, 0.24f, 70f),
+    Triple(-0.50f, -0.10f, -20f),
+)
+
+/** Bannerning o'ng chetidan yarmi ko'rinib turadigan pitsa (oddiy shakllardan chizilgan). */
+@Composable
+private fun PizzaArt(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val radius = size.height * 0.56f
+        val center = Offset(size.width - radius * 0.42f, size.height * 0.48f)
+        drawCircle(Color(0xFFD08A3C), radius, center)
+        drawCircle(Color(0xFFEFB45F), radius * 0.955f, center)
+        drawCircle(Color(0xFFE5432A), radius * 0.83f, center)
+        drawCircle(Color(0xFFF7D98B), radius * 0.79f, center)
+        for ((dx, dy) in PIZZA_SPOTS) {
+            val spot = Offset(center.x + dx * radius, center.y + dy * radius)
+            drawCircle(Color(0xFFC7321C), radius * 0.135f, spot)
+            drawCircle(Color(0xFFE5432A), radius * 0.105f, spot)
+        }
+        for ((dx, dy, angle) in PIZZA_LEAVES) {
+            val leaf = Offset(center.x + dx * radius, center.y + dy * radius)
+            val leafSize = Size(radius * 0.17f, radius * 0.085f)
+            rotate(angle, leaf) {
+                drawOval(
+                    color = Color(0xFF1E9E61),
+                    topLeft = Offset(leaf.x - leafSize.width / 2, leaf.y - leafSize.height / 2),
+                    size = leafSize,
+                )
             }
         }
     }
@@ -639,16 +709,28 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
     } else {
         {
             IconButton(onClick = { onChange("") }) {
-                Icon(Icons.Default.Close, contentDescription = "Qidiruvni tozalash")
+                Icon(
+                    painter = painterResource(R.drawable.ic_close),
+                    contentDescription = "Qidiruvni tozalash",
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
     }
     TextField(
         value = query,
         onValueChange = { onChange(it.take(40)) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .fieldBorder(),
         placeholder = { Text("Taom qidirish") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        leadingIcon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_search),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+        },
         trailingIcon = clearButton,
         singleLine = true,
         shape = RoundedCornerShape(18.dp),
@@ -662,45 +744,34 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
 @Composable
 private fun ActiveOrders(orders: List<Order>, onOpenOrder: (Int) -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         for (order in orders) {
-            Surface(
-                onClick = { onOpenOrder(order.id) },
-                shape = MaterialTheme.shapes.large,
-                color = scheme.surface,
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconBadge(size = 44.dp) {
-                            OrderStatusIcon(
-                                status = order.status,
-                                modifier = Modifier.size(22.dp),
-                                tint = scheme.primary,
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Buyurtma №${order.id}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = scheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = order.statusLabel,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = scheme.onSurfaceVariant,
+            SectionCard(onClick = { onOpenOrder(order.id) }, padding = 14.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(icon = statusIcon(order.status))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Buyurtma №${order.id}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.hint,
+                        )
+                        Text(
+                            text = order.statusLabel,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
-                    OrderProgressBar(status = order.status)
+                    Icon(
+                        painter = painterResource(R.drawable.ic_chevron),
+                        contentDescription = null,
+                        tint = scheme.hint,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
+                Spacer(Modifier.height(12.dp))
+                OrderProgressBar(status = order.status)
             }
         }
     }
@@ -736,7 +807,6 @@ private fun CategoryChips(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
     val listState = rememberLazyListState()
     // Tanlangan bo'lim tugmasi har doim ko'rinib turadi
     LaunchedEffect(selectedIndex) {
@@ -749,20 +819,7 @@ private fun CategoryChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         itemsIndexed(sections, key = { _, section -> section.id }) { index, section ->
-            val selected = index == selectedIndex
-            Surface(
-                onClick = { onSelect(index) },
-                shape = RoundedCornerShape(50),
-                color = if (selected) scheme.secondary else scheme.surface,
-                contentColor = if (selected) scheme.onSecondary else scheme.onSurface,
-            ) {
-                Text(
-                    text = section.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 11.dp),
-                )
-            }
+            TabChip(text = section.title, selected = index == selectedIndex, onClick = { onSelect(index) })
         }
     }
 }
@@ -770,45 +827,48 @@ private fun CategoryChips(
 @Composable
 private fun SectionHeader(title: String, count: Int) {
     Row(
-        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
+        modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 2.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        Text(text = title, style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.width(8.dp))
         Text(
-            text = count.toString(),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 2.dp),
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "$count ta taom",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.hint,
+            modifier = Modifier.padding(bottom = 4.dp),
         )
     }
 }
 
 /** Ro'yxat ichidagi bo'sh holat (masalan, qidiruvda hech narsa topilmadi). */
 @Composable
-private fun EmptyHint(icon: ImageVector, title: String, text: String) {
-    val scheme = MaterialTheme.colorScheme
+private fun EmptyHint(icon: Int, title: String, text: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconBadge(size = 80.dp) {
-            Icon(icon, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(34.dp))
-        }
+        IconTile(icon = icon, size = 80.dp, iconSize = 34.dp)
         Spacer(Modifier.height(16.dp))
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
         Spacer(Modifier.height(4.dp))
         Text(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
-            color = scheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
     }
 }
 
+/** Taom kartochkasi: rasm, nom, qisqa tavsif, pastda narx va "+" (savatda bo'lsa son tanlagich). */
 @Composable
 private fun ProductCard(
     product: Product,
@@ -817,135 +877,193 @@ private fun ProductCard(
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.large
+    val source = remember { MutableInteractionSource() }
+    // Nom ikki qatorga sig'sa, tavsif ko'rsatilmaydi: hamma kartochka bir xil balandlikda qoladi
+    var nameLines by remember(product.name) { mutableIntStateOf(1) }
+    val textBlockHeight = with(LocalDensity.current) { 42.sp.toDp() }
     Surface(
         onClick = onClick,
-        shape = MaterialTheme.shapes.large,
+        modifier = modifier
+            .pressScale(source, 0.98f)
+            .softShadow(shape),
+        shape = shape,
         color = scheme.surface,
+        interactionSource = source,
     ) {
-        Column(modifier = Modifier.padding(6.dp)) {
+        Column(modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 10.dp)) {
             Box {
                 ProductImage(
                     url = imageUrl,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(1.12f)
-                        .clip(RoundedCornerShape(17.dp))
+                        .aspectRatio(1.2f)
+                        .clip(RoundedCornerShape(19.dp))
                         .alpha(if (product.isAvailable) 1f else 0.5f),
+                    seed = product.id,
                 )
                 if (!product.isAvailable) {
                     Text(
                         text = "Tugagan",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
                         color = scheme.onSurface,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(8.dp)
-                            .clip(RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(9.dp))
                             .background(scheme.surface)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
                     )
-                } else if (quantity > 0) {
-                    // Savatdagi soni: rasm burchagidagi belgi
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(scheme.primary),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                }
+            }
+            Column(modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 10.dp)) {
+                Column(modifier = Modifier.height(textBlockHeight)) {
+                    Text(
+                        text = product.name,
+                        style = MaterialTheme.typography.titleMedium.copy(lineHeight = 20.sp),
+                        color = if (product.isAvailable) scheme.onSurface else scheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { nameLines = it.lineCount },
+                        modifier = Modifier.testTag("product-name"),
+                    )
+                    if (nameLines < 2 && product.description.isNotBlank()) {
                         Text(
-                            text = quantity.toString(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = scheme.onPrimary,
+                            text = product.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = scheme.hint,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp),
                         )
                     }
                 }
-            }
-            Column(modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
-                Text(
-                    text = product.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (product.isAvailable) scheme.onSurface else scheme.onSurfaceVariant,
-                    minLines = 2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("product-name"),
-                )
-                Spacer(Modifier.height(10.dp))
-                when {
-                    !product.isAvailable -> Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.height(38.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!product.isAvailable) {
                         Text(
                             text = "Hozircha yo'q",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = scheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.hint,
                         )
+                    } else {
+                        // Savatga qo'shilgach "so'm" yozuvi yashiriladi: tor ekranda son tanlagichga joy qoladi
+                        PriceText(
+                            amount = product.price,
+                            unit = quantity == 0,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (quantity == 0) {
+                            AddButton(onClick = onAdd)
+                        } else {
+                            QuantityStepper(quantity = quantity, onMinus = onRemove, onPlus = onAdd)
+                        }
                     }
-
-                    quantity == 0 -> PriceAddButton(
-                        price = formatSum(product.price),
-                        onClick = onAdd,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    else -> QuantityStepper(
-                        quantity = quantity,
-                        onMinus = onRemove,
-                        onPlus = onAdd,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
                 }
             }
         }
     }
 }
 
-/** Ekran pastida suzib turadigan "Savat" tugmasi: savatda taom bo'lsa ko'rinadi. */
+/** Pastda suzib turadigan to'q shisha "Savat" paneli: savatda taom bo'lsa ko'rinadi. */
 @Composable
-private fun CartBar(count: Int, total: Int, onClick: () -> Unit) {
+private fun CartBar(glass: HazeState, count: Int, total: Int, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(20.dp)
-    Surface(
-        onClick = onClick,
+    val source = remember { MutableInteractionSource() }
+    val ink = Color(0xFF17130F)
+    GlassBox(
+        glass = glass,
         modifier = Modifier
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
             .fillMaxWidth()
-            .height(60.dp)
-            .shadow(elevation = 14.dp, shape = shape, ambientColor = scheme.primary, spotColor = scheme.primary),
-        shape = shape,
-        color = scheme.primary,
-        contentColor = scheme.onPrimary,
+            .height(64.dp)
+            .pressScale(source),
+        shape = RoundedCornerShape(22.dp),
+        tone = GlassTone.Dark,
+        elevation = 16.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 14.dp, end = 10.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = source,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(scheme.onPrimary.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(count.toString(), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(scheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_bag),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 5.dp, y = (-5).dp)
+                        .defaultMinSize(minWidth = 19.dp, minHeight = 19.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp, fontSize = 11.sp),
+                        color = ink,
+                        maxLines = 1,
+                    )
+                }
             }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "Savat",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(formatSum(total), style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Savat",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onInkMuted,
+                )
+                Text(
+                    text = formatSum(total),
+                    style = PriceStyle.copy(fontSize = 17.sp),
+                    color = Color.White,
+                    maxLines = 1,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Color.White)
+                    .padding(start = 14.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Savatga", style = MaterialTheme.typography.labelLarge, color = ink, maxLines = 1)
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    painter = painterResource(R.drawable.ic_chevron),
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
@@ -965,8 +1083,9 @@ private fun ProductSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = scheme.surface,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
     ) {
+        BlurBehindEffect()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -978,13 +1097,14 @@ private fun ProductSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.3f)
-                    .clip(RoundedCornerShape(22.dp)),
+                    .clip(RoundedCornerShape(24.dp)),
                 iconSize = 76.dp,
+                seed = product.id,
             )
             Spacer(Modifier.height(18.dp))
             Text(
                 text = product.name,
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
             if (product.description.isNotBlank()) {
@@ -1011,46 +1131,78 @@ private fun ProductSheet(
                     onMinus = onRemove,
                     onPlus = onAdd,
                     modifier = Modifier.fillMaxWidth(),
-                    height = 56.dp,
-                    corner = 18.dp,
-                    label = "$quantity ta · ${formatSum(product.price * quantity)}",
+                    height = 58.dp,
+                    corner = 20.dp,
+                    buttonWidth = 60.dp,
+                    label = "$quantity ta · ${formatNumber(product.price * quantity)} so'm",
+                    expand = true,
                 )
             }
         }
     }
 }
 
-/** Menyu birinchi marta yuklanayotganda ko'rinadigan "skelet". */
+/** Menyu birinchi marta yuklanayotganda ko'rinadigan "skelet": haqiqiy sahifa shaklini takrorlaydi. */
 @Composable
-private fun MenuSkeleton() {
+private fun MenuSkeleton(modifier: Modifier = Modifier, top: Dp) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+            .padding(start = 16.dp, end = 16.dp, top = top),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SkeletonBox(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp),
-            shape = RoundedCornerShape(26.dp),
+                .height(154.dp),
+            shape = RoundedCornerShape(28.dp),
         )
-        SkeletonBox(
+        Row(
             modifier = Modifier
-                .padding(top = 10.dp)
-                .width(150.dp)
-                .height(28.dp),
-        )
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            SkeletonBox(modifier = Modifier.size(width = 110.dp, height = 26.dp))
+            Spacer(Modifier.weight(1f))
+            SkeletonBox(modifier = Modifier.size(width = 64.dp, height = 14.dp))
+        }
         repeat(2) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(2) {
-                    SkeletonBox(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(236.dp),
-                        shape = MaterialTheme.shapes.large,
-                    )
+                    ProductCardSkeleton(modifier = Modifier.weight(1f))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductCardSkeleton(modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.large
+    Column(
+        modifier = modifier
+            .softShadow(shape)
+            .clip(shape)
+            .background(scheme.surface)
+            .padding(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 10.dp),
+    ) {
+        SkeletonBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.2f),
+            shape = RoundedCornerShape(19.dp),
+        )
+        Column(modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 12.dp)) {
+            SkeletonBox(modifier = Modifier.size(width = 84.dp, height = 16.dp))
+            Spacer(Modifier.height(8.dp))
+            SkeletonBox(modifier = Modifier.size(width = 112.dp, height = 12.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SkeletonBox(modifier = Modifier.size(width = 72.dp, height = 18.dp))
+                Spacer(Modifier.weight(1f))
+                SkeletonBox(modifier = Modifier.size(38.dp))
             }
         }
     }

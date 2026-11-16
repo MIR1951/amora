@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Kutilmoqda. Maketdagi belgilar uslubida: 1.9 qalinlikdagi yumaloq chiziq. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M12,3.5 a8.5,8.5 0 1 1 0,17 a8.5,8.5 0 1 1 0,-17 Z"
-        android:strokeColor="#FF000000"
-        android:strokeWidth="2" />
-    <path
-        android:pathData="M12,7.5 v4.8 l3.2,2"
+        android:pathData="M3.5,12 a8.5,8.5 0 1,0 17.0,0 a8.5,8.5 0 1,0 -17.0,0 Z"
         android:strokeColor="#FF000000"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="2" />
+        android:strokeWidth="1.9" />
+    <path
+        android:pathData="M12 7.5V12l3 2"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.9" />
 </vector>
