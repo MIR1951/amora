@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12 va undan yangi: tizimning o'z ochilish ekrani -->
+    <style name="Theme.Amora.Launch">
+        <item name="android:windowBackground">@color/brand</item>
+        <item name="android:windowSplashScreenBackground">@color/brand</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>

@@ -12,16 +12,22 @@ full      CI ichida ishlayotgan SINOV serveriga qaratilgan APK uchun. Buyurtma b
           berish ham tekshiriladi. Haqiqiy serverga qaratilgan APK bilan ISHLATILMAYDI.
 """
 
+import json
 import re
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PACKAGE = "uz.amora.app"
 # backend_ctl.py sinov serverida kafe nomini shunga o'zgartiradi (TEST_CAFE_NAME)
 TEST_CAFE_NAME = "Amora sinov serveri"
+# Sinov serveri CI ichida shu manzilda ishlaydi (emulyator uni 10.0.2.2 orqali ko'radi)
+TEST_SERVER = "http://127.0.0.1:8000"
+# Kafe joylashuvi serverda kiritilmagan bo'lsa, emulyator shu yerga qo'yiladi: Samarqand markazi
+DEFAULT_LOCATION = (39.6547, 66.9758)
 BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 OUT = Path(".")
 
@@ -40,10 +46,43 @@ def dump():
         adb("shell", "uiautomator", "dump", "/sdcard/ui.xml", check=False)
         raw = adb("exec-out", "cat", "/sdcard/ui.xml", check=False)
         try:
-            return ET.fromstring(raw.decode("utf-8", "replace"))
+            root = ET.fromstring(raw.decode("utf-8", "replace"))
         except ET.ParseError:
             time.sleep(1)
+            continue
+        if not dismiss_system_dialog(root):
+            return root
     raise RuntimeError("Ekran tuzilishini o'qib bo'lmadi")
+
+
+def dismiss_system_dialog(root):
+    """Boshqa ilova haqidagi tizim oynasini yopadi. Yopgan bo'lsa True qaytaradi.
+
+    CI emulyatori sekin ishlaganda Android "Pixel Launcher isn't responding" kabi oyna chiqaradi.
+    U Amora'ga aloqador emas, lekin ekranni to'sib qo'yadi: sinov hech narsani ko'ra olmaydi,
+    bosish va yozish ham ilovaga emas, shu oynaga ketadi.
+    Oyna Amora'ning o'zi haqida bo'lsa, bu haqiqiy xato: sinov shu yerda to'xtaydi.
+    """
+    items = list(nodes(root))
+    title = next(
+        (node["text"] for node in items if "isn't responding" in node["text"] or "keeps stopping" in node["text"]),
+        None,
+    )
+    if title is None:
+        return False
+    if "Amora" in title:
+        raise RuntimeError(f"Ilova ishlamay qoldi: {title}")
+    # "Wait" bosilsa, oyna bir necha soniyadan keyin yana chiqadi. "Close app" o'sha ilovani
+    # (Amora'ni emas) yopadi, tizim uni orqa fonda o'zi qayta ishga tushiradi.
+    button = next((node for node in items if node["text"] == "Close app"), None)
+    if button is None:
+        button = next((node for node in items if node["text"] == "Wait"), None)
+    if button is None:
+        raise RuntimeError(f"Tizim oynasini yopib bo'lmadi: {title}")
+    print(f"[ogohlantirish] tizim oynasi yopildi: {title}", flush=True)
+    adb("shell", "input", "tap", str(button["x"]), str(button["y"]))
+    time.sleep(2)
+    return True
 
 
 def nodes(root):
@@ -58,6 +97,7 @@ def nodes(root):
             "text": node.get("text") or "",
             "desc": node.get("content-desc") or "",
             "class": node.get("class") or "",
+            "id": node.get("resource-id") or "",
             "x": (x1 + x2) // 2,
             "y": (y1 + y2) // 2,
         }
@@ -90,6 +130,14 @@ def tap(needle, timeout=45, exclude=()):
     tap_node(wait_for(needle, timeout, exclude))
 
 
+def find_id(resource_id):
+    """Ilova kodidagi testTag bo'yicha izlaydi (masalan, taom nomi: "product-name")."""
+    for node in nodes(dump()):
+        if node["id"] == resource_id or node["id"].endswith("/" + resource_id):
+            return node
+    return None
+
+
 def tap_field(index):
     """Ekrandagi matn kiritish maydonlaridan birini bosadi (0 dan boshlab)."""
     fields = [node for node in nodes(dump()) if node["class"].endswith("EditText")]
@@ -103,12 +151,34 @@ def type_text(text):
     time.sleep(1)
 
 
+def fill_field(index, text):
+    """Maydonni bosib, matn yozadi va yozilganini tekshiradi.
+
+    Yozish paytida tizim oynasi chiqib qolsa, harflar ilovaga yetib bormaydi: bunday holda
+    maydon tozalanib, qayta yoziladi.
+    """
+    wanted = text.replace(" ", "")
+    for _ in range(4):
+        tap_field(index)
+        type_text(text)
+        fields = [node for node in nodes(dump()) if node["class"].endswith("EditText")]
+        if index < len(fields) and wanted in fields[index]["text"].replace(" ", ""):
+            return
+        tap_field(index)
+        adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+        adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * 40))
+        time.sleep(1)
+    raise RuntimeError(f"{index}-maydonga yozib bo'lmadi: {text!r}")
+
+
 def shot(name):
+    dump()  # ekranni tizim oynasi to'sib turgan bo'lsa, avval u yopiladi
     (OUT / f"{name}.png").write_bytes(adb("exec-out", "screencap", "-p"))
     print(f"[rasm] {name}.png", flush=True)
 
 
 def back():
+    dump()
     adb("shell", "input", "keyevent", "BACK")
     time.sleep(2)
 
@@ -152,9 +222,12 @@ def fill_cart():
     shot("01-menu")
     print("Menyu:", visible_texts(), flush=True)
 
-    # Taom haqida ma'lumot oynasi (ochilmasa, sinov davom etaveradi)
+    # Taom haqida ma'lumot oynasi: taom nomi bosilganda ochiladi (ochilmasa, sinov davom etaveradi)
     try:
-        tap("so'm", exclude=("Yetkazish", "buyurtma", "Savat"))
+        name = find_id("product-name")
+        if name is None:
+            raise RuntimeError("taom kartochkasi topilmadi")
+        tap_node(name)
         wait_for("Savatga qo'shish", timeout=15)
         shot("02-product")
         back()
@@ -182,10 +255,8 @@ def fill_cart():
     tap("Ism va telefonni kiriting")
 
     wait_for("Saqlash")
-    tap_field(0)
-    type_text("Sinov")
-    tap_field(1)
-    type_text("901234567")
+    fill_field(0, "Sinov")
+    fill_field(1, "901234567")
     shot("07-profile")
     tap("Saqlash")
 
@@ -195,13 +266,29 @@ def fill_cart():
     print("Savat:", visible_texts(), flush=True)
 
 
+def open_tab(label):
+    """Pastki menyudagi bo'limga o'tadi: "Menyu", "Buyurtmalar" yoki "Profil"."""
+    matches = [node for node in nodes(dump()) if node["text"] == label]
+    if not matches:
+        raise RuntimeError(f"Pastki menyuda topilmadi: {label!r}")
+    # Shu so'z ekranning boshqa joyida ham bo'lishi mumkin: pastki menyu hammasidan pastda turadi
+    tap_node(max(matches, key=lambda node: node["y"]))
+
+
+def shot_profile(name):
+    open_tab("Profil")
+    wait_for("Shaxsiy ma'lumotlar")
+    shot(name)
+
+
 def scenario_readonly():
     fill_cart()
     # "Buyurtma berish" tugmasi ATAYLAB bosilmaydi: haqiqiy kafega buyurtma ketmasin.
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Hali buyurtma yo'q")
     shot("09-orders")
+    shot_profile("10-profile")
 
 
 def place_order():
@@ -257,7 +344,7 @@ def scenario_full():
 
     # Buyurtmalar tarixi va undan buyurtmani ochish
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Buyurtma №")
     wait_for("Yetkazildi")
     shot("14-orders")
@@ -286,12 +373,71 @@ def scenario_full():
     shot("18-order-rejected")
 
     back()
-    tap("Buyurtmalarim")
+    open_tab("Buyurtmalar")
     wait_for("Rad etildi")
     wait_for("Bekor qilindi")
     wait_for("Yetkazildi")
     shot("19-orders-all")
     print("Buyurtmalar:", visible_texts(), flush=True)
+
+    shot_profile("20-profile")
+
+    # Tungi rejim: ranglar qorong'i mavzuda ham to'g'ri ko'rinishini rasmga olamiz
+    open_tab("Menyu")
+    adb("shell", "cmd", "uimode", "night", "yes")
+    time.sleep(4)
+    wait_for(TEST_CAFE_NAME)
+    shot("21-menu-dark")
+    open_tab("Buyurtmalar")
+    wait_for("Rad etildi")
+    shot("22-orders-dark")
+    adb("shell", "cmd", "uimode", "night", "no")
+    time.sleep(3)
+
+
+def live_server():
+    """Haqiqiy server manzili: ilova yig'ilganda ishlatilgan android/gradle.properties dan."""
+    properties = Path(__file__).resolve().parents[1] / "gradle.properties"
+    for line in properties.read_text(encoding="utf-8").splitlines():
+        if line.startswith("amora.apiBaseUrl="):
+            return line.split("=", 1)[1].strip().rstrip("/")
+    raise RuntimeError("gradle.properties da amora.apiBaseUrl topilmadi")
+
+
+def customer_location(server):
+    """Emulyator turadigan joy: kafedan 150 metrcha narida, ya'ni yetkazish hududi ichida.
+
+    Kafe joylashuvi serverdan o'qiladi (faqat o'qish so'rovi). Kafe o'z manzilini va yetkazish
+    hududini o'zgartirsa ham, sinovdagi "mijoz" hudud ichida qoladi.
+    """
+    try:
+        with urllib.request.urlopen(f"{server}/api/v1/shop", timeout=20) as response:
+            shop = json.load(response)
+        latitude, longitude = shop.get("cafe_latitude"), shop.get("cafe_longitude")
+        if latitude is not None and longitude is not None:
+            return float(latitude) + 0.0015, float(longitude)
+        print("[ogohlantirish] serverda kafe joylashuvi kiritilmagan", flush=True)
+    except Exception as error:
+        print(f"[ogohlantirish] kafe joylashuvini o'qib bo'lmadi: {error}", flush=True)
+    return DEFAULT_LOCATION
+
+
+def save_diagnostics():
+    """Emulyator holati: "javob bermayapti" (ANR) yozuvlari, protsessor yuklamasi, chizilgan kadrlar.
+
+    Tizim oynasi chiqqan bo'lsa, sababi shu yerdan ko'rinadi: emulyator shunchaki sekinmi yoki
+    ilova protsessorni band qilib qo'yganmi.
+    """
+    parts = []
+    log = adb("logcat", "-d", "ActivityManager:E", "*:S", check=False).decode(errors="replace")
+    anr = [line for line in log.splitlines() if "ANR in" in line or "Reason:" in line or "CPU usage" in line
+           or "% TOTAL" in line or "uz.amora" in line or "nexuslauncher" in line]
+    parts.append("== ANR yozuvlari ==\n" + "\n".join(anr[-80:]))
+    cpu = adb("shell", "dumpsys", "cpuinfo", check=False).decode(errors="replace")
+    parts.append("== Protsessor ==\n" + "\n".join(cpu.splitlines()[:25]))
+    gfx = adb("shell", "dumpsys", "gfxinfo", PACKAGE, check=False).decode(errors="replace")
+    parts.append("== Kadrlar ==\n" + "\n".join(gfx.splitlines()[:30]))
+    (OUT / "diagnostics.txt").write_text("\n\n".join(parts), encoding="utf-8")
 
 
 def main():
@@ -305,7 +451,8 @@ def main():
     adb("install", "-r", apk)
     for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"):
         adb("shell", "pm", "grant", PACKAGE, f"android.permission.{permission}")
-    adb("emu", "geo", "fix", "66.9758", "39.6547", check=False)  # Samarqand markazi
+    latitude, longitude = customer_location(TEST_SERVER if mode == "full" else live_server())
+    adb("emu", "geo", "fix", f"{longitude:.5f}", f"{latitude:.5f}", check=False)  # avval uzunlik, keyin kenglik
     adb("logcat", "-c", check=False)
     adb("shell", "am", "start", "-W", "-n", f"{PACKAGE}/.MainActivity")
 
@@ -325,6 +472,11 @@ def main():
         (OUT / "logcat.txt").write_bytes(log)
         print(log.decode(errors="replace")[-6000:], flush=True)
         return 1
+    finally:
+        try:
+            save_diagnostics()
+        except Exception as error:
+            print(f"[ogohlantirish] tashxisni saqlab bo'lmadi: {error}", flush=True)
     print(f"Sinov muvaffaqiyatli o'tdi ({mode})", flush=True)
     return 0
 

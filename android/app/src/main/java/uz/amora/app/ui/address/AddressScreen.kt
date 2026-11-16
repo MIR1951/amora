@@ -11,7 +11,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,19 +22,20 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,11 +49,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -71,8 +77,9 @@ import org.osmdroid.views.overlay.Polygon
 import uz.amora.app.AppContainer
 import uz.amora.app.R
 import uz.amora.app.data.Address
-import uz.amora.app.ui.components.BackTopBar
 import uz.amora.app.ui.components.BigButton
+import uz.amora.app.ui.components.CircleIconButton
+import uz.amora.app.ui.components.fieldColors
 import uz.amora.app.util.distanceKm
 
 // Manzil hali tanlanmagan va kafe joylashuvi ham kiritilmagan bo'lsa, xarita shu yerdan ochiladi
@@ -85,6 +92,11 @@ private const val STREET_ZOOM = 17.0
 // Bundan uzoqroq ko'rinishda nuqta juda noaniq bo'ladi: tasdiqlashga ruxsat berilmaydi
 private const val MIN_CONFIRM_ZOOM = 14.0
 private const val MAX_NOTE_LENGTH = 255
+
+// Pastki panel burchagi: xarita shu qadar panel ostiga kirib turadi
+private val PANEL_CORNER = 26.dp
+private val PIN_HEAD = 38.dp
+private val PIN_STEM = 16.dp
 
 /**
  * Yetkazish manzilini tanlash. Xarita suriladi, o'rtadagi belgi turgan joy manzil bo'ladi.
@@ -259,45 +271,64 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
+    val scheme = MaterialTheme.colorScheme
+
     Scaffold(
         modifier = Modifier.imePadding(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { BackTopBar(title = "Yetkazish manzili", onBack = onBack) },
+        containerColor = scheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 12.dp,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                color = scheme.surface,
+                shadowElevation = 16.dp,
+                shape = RoundedCornerShape(topStart = PANEL_CORNER, topEnd = PANEL_CORNER),
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(16.dp),
+                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 12.dp),
                 ) {
+                    Text("Yetkazish manzili", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "Xaritani surib, belgini yetkazish joyiga qo'ying",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(14.dp))
+
                     val currentNotice = notice
-                    if (outOfZone) {
-                        Text(
-                            text = "Bu joy yetkazish hududidan tashqarida. Belgini doira ichiga suring.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    } else if (currentNotice != null) {
-                        Text(
-                            text = currentNotice,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        if (locationOff) {
-                            TextButton(onClick = { openLocationSettings(context) }) {
-                                Text("Joylashuv sozlamalarini ochish")
-                            }
-                        } else {
-                            Spacer(Modifier.height(8.dp))
-                        }
+                    val warning = when {
+                        outOfZone -> "Bu joy yetkazish hududidan tashqarida. Belgini doira ichiga suring."
+                        else -> currentNotice
                     }
-                    OutlinedTextField(
+                    if (warning != null) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            color = scheme.errorContainer,
+                            contentColor = scheme.onErrorContainer,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                Text(warning, style = MaterialTheme.typography.bodyMedium)
+                                if (!outOfZone && locationOff) {
+                                    TextButton(
+                                        onClick = { openLocationSettings(context) },
+                                        contentPadding = PaddingValues(0.dp),
+                                    ) {
+                                        Text(
+                                            text = "Joylashuv sozlamalarini ochish",
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    TextField(
                         value = note,
                         onValueChange = { note = it.take(MAX_NOTE_LENGTH) },
                         label = { Text("Mo'ljal, uy, xonadon") },
@@ -305,6 +336,7 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                         maxLines = 2,
                         shape = MaterialTheme.shapes.medium,
+                        colors = fieldColors(container = scheme.surfaceVariant),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     )
                     Spacer(Modifier.height(12.dp))
@@ -317,35 +349,75 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
             }
         },
     ) { padding ->
+        // Xarita panelning yumaloq burchaklari ostiga ham kirib turadi
+        val mapBottom = (padding.calculateBottomPadding() - PANEL_CORNER).coerceAtLeast(0.dp)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(bottom = mapBottom),
         ) {
             AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
             // O'rtadagi belgi: uchi aynan xarita markazini ko'rsatadi
-            Icon(
-                imageVector = Icons.Default.Place,
-                contentDescription = "Tanlangan joy",
-                tint = MaterialTheme.colorScheme.primary,
+            Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(48.dp)
-                    .offset(y = (-20).dp),
+                    .size(width = 10.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.28f)),
             )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = -(PIN_HEAD + PIN_STEM) / 2)
+                    .semantics { contentDescription = "Tanlangan joy" },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(PIN_HEAD)
+                        .shadow(elevation = 6.dp, shape = CircleShape)
+                        .clip(CircleShape)
+                        .background(scheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(width = 4.dp, height = PIN_STEM)
+                        .clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
+                        .background(scheme.primary),
+                )
+            }
 
-            Text(
-                text = "Xaritani surib, belgini yetkazish joyiga qo'ying",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
+            // Holat satri ostidagi yumshoq parda: soat va belgilar xarita ustida ham o'qiladi
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(12.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .fillMaxWidth()
+                    .height(96.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(scheme.background.copy(alpha = 0.85f), scheme.background.copy(alpha = 0f)),
+                        ),
+                    ),
+            )
+
+            CircleIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                label = "Orqaga",
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp),
+                elevation = 6.dp,
             )
 
             // OpenStreetMap shartiga ko'ra xarita manbasi ko'rsatilishi kerak
@@ -355,27 +427,32 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
                 color = Color(0xFF333333),
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .padding(start = 8.dp, bottom = PANEL_CORNER + 6.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(Color(0xCCFFFFFF))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
 
-            FloatingActionButton(
+            Surface(
                 onClick = onMyLocation,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.primary,
+                    .padding(end = 16.dp, bottom = PANEL_CORNER + 16.dp)
+                    .size(52.dp),
+                shape = CircleShape,
+                color = scheme.surface,
+                contentColor = scheme.primary,
+                shadowElevation = 6.dp,
             ) {
-                if (locating) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_gps),
-                        contentDescription = "Mening joylashuvim",
-                    )
+                Box(contentAlignment = Alignment.Center) {
+                    if (locating) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
+                    } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_gps),
+                            contentDescription = "Mening joylashuvim",
+                        )
+                    }
                 }
             }
         }

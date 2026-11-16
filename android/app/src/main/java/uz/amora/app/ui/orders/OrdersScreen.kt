@@ -2,6 +2,7 @@ package uz.amora.app.ui.orders
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,9 +10,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,11 +48,16 @@ import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
 import uz.amora.app.data.ApiException
 import uz.amora.app.data.Order
-import uz.amora.app.ui.components.BackTopBar
-import uz.amora.app.ui.components.LoadingBox
+import uz.amora.app.ui.components.IconBadge
 import uz.amora.app.ui.components.MessageBox
+import uz.amora.app.ui.components.OrderProgressBar
+import uz.amora.app.ui.components.OrderStatusIcon
 import uz.amora.app.ui.components.SectionCard
+import uz.amora.app.ui.components.SkeletonBox
 import uz.amora.app.ui.components.StatusBadge
+import uz.amora.app.ui.components.TitleTopBar
+import uz.amora.app.ui.components.statusContainerColor
+import uz.amora.app.ui.components.statusContentColor
 import uz.amora.app.util.formatDateTime
 import uz.amora.app.util.formatSum
 
@@ -107,9 +120,9 @@ class OrdersViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
-/** Mijozning barcha buyurtmalari, eng yangisi tepada. */
+/** Mijozning barcha buyurtmalari, eng yangisi tepada. Pastki menyudagi "Buyurtmalar" bo'limi. */
 @Composable
-fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int) -> Unit) {
+fun OrdersScreen(container: AppContainer, onOpenMenu: () -> Unit, onOpenOrder: (Int) -> Unit) {
     val vm: OrdersViewModel = viewModel(
         factory = viewModelFactory { initializer { OrdersViewModel(container) } },
     )
@@ -125,7 +138,7 @@ fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { BackTopBar(title = "Buyurtmalarim", onBack = onBack) },
+        topBar = { TitleTopBar(title = "Buyurtmalarim") },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = state.refreshing,
@@ -135,10 +148,10 @@ fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int)
                 .padding(padding),
         ) {
             when {
-                state.loading -> LoadingBox()
+                state.loading -> OrdersSkeleton()
 
                 state.orders.isEmpty() && state.error != null -> MessageBox(
-                    emoji = "📡",
+                    icon = Icons.Default.Refresh,
                     title = "Buyurtmalar yuklanmadi",
                     text = state.error,
                     actionLabel = "Qayta urinish",
@@ -146,16 +159,16 @@ fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int)
                 )
 
                 state.orders.isEmpty() -> MessageBox(
-                    emoji = "🧾",
+                    icon = Icons.AutoMirrored.Filled.List,
                     title = "Hali buyurtma yo'q",
                     text = "Birinchi buyurtmangiz shu yerda ko'rinadi",
                     actionLabel = "Menyuga o'tish",
-                    onAction = onBack,
+                    onAction = onOpenMenu,
                 )
 
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(items = state.orders, key = { it.id }) { order ->
@@ -165,9 +178,11 @@ fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int)
                         item(key = "more") {
                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 if (state.loadingMore) {
-                                    CircularProgressIndicator()
+                                    CircularProgressIndicator(strokeWidth = 3.dp)
                                 } else {
-                                    TextButton(onClick = { vm.loadMore() }) { Text("Yana ko'rsatish") }
+                                    TextButton(onClick = { vm.loadMore() }) {
+                                        Text("Yana ko'rsatish", style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                             }
                         }
@@ -180,32 +195,74 @@ fun OrdersScreen(container: AppContainer, onBack: () -> Unit, onOpenOrder: (Int)
 
 @Composable
 private fun OrderCard(order: Order, onClick: () -> Unit) {
-    SectionCard(onClick = onClick) {
+    val scheme = MaterialTheme.colorScheme
+    SectionCard(onClick = onClick, padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Buyurtma №${order.id}",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            StatusBadge(status = order.status, label = order.statusLabel)
+            IconBadge(size = 46.dp, container = statusContainerColor(order.status)) {
+                OrderStatusIcon(
+                    status = order.status,
+                    modifier = Modifier.size(22.dp),
+                    tint = statusContentColor(order.status),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Buyurtma №${order.id}",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = formatDateTime(order.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(text = formatSum(order.total), style = MaterialTheme.typography.titleMedium, maxLines = 1)
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
             text = order.items.joinToString(", ") { "${it.quantity} × ${it.name}" },
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = scheme.onSurfaceVariant,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+        if (order.isActive) {
+            OrderProgressBar(status = order.status)
+            Spacer(Modifier.height(12.dp))
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = formatDateTime(order.createdAt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
+            StatusBadge(status = order.status, label = order.statusLabel)
+            Spacer(Modifier.weight(1f))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = scheme.onSurfaceVariant,
             )
-            Text(text = formatSum(order.total), style = MaterialTheme.typography.titleSmall)
+        }
+    }
+}
+
+/** Ro'yxat birinchi marta yuklanayotganda ko'rinadigan "skelet". */
+@Composable
+private fun OrdersSkeleton() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        repeat(3) {
+            SkeletonBox(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                shape = MaterialTheme.shapes.large,
+            )
         }
     }
 }
