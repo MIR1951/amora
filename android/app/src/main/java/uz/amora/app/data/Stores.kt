@@ -5,8 +5,12 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -208,17 +212,37 @@ class ActiveOrders(private val api: ApiClient, private val session: SessionStore
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
 
+    private val _statusChanges = MutableSharedFlow<Order>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /**
+     * Kuzatilayotgan (faol) buyurtma boshqa holatga o'tgani qayta o'qishda aniqlandi. Jonli ulanish
+     * uzilib turgan paytda o'tkazib yuborilgan o'zgarishlar ham shu yerdan chiqadi.
+     */
+    val statusChanges: SharedFlow<Order> = _statusChanges.asSharedFlow()
+
     suspend fun refresh() {
         if (session.token == null) {
             _orders.value = emptyList()
             return
         }
+        val before = _orders.value
         try {
-            _orders.value = api.orders(limit = 5).orders.filter { it.isActive }
+            val latest = api.orders(limit = 5).orders
+            _orders.value = latest.filter { it.isActive }
+            changedOrders(before, latest).forEach { _statusChanges.tryEmit(it) }
         } catch (e: ApiException) {
             if (e.isUnauthorized) _orders.value = emptyList()
         }
     }
+}
+
+/** Avval faol bo'lgan buyurtmalardan qaysilari boshqa holatga o'tgan (tugaganlari ham). */
+fun changedOrders(before: List<Order>, latest: List<Order>): List<Order> {
+    val known = before.associate { it.id to it.status }
+    return latest.filter { order -> known[order.id].let { it != null && it != order.status } }
 }
 
 /** Ro'yxatdan o'tish va profil. Mijoz birinchi buyurtma paytida ro'yxatdan o'tadi. */

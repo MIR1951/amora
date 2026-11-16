@@ -250,8 +250,9 @@ fun OrderScreen(
     }
 
     // Mijoz shu buyurtmaga qarab turibdi: u haqidagi bildirishnoma ko'rsatilmaydi (va bori yopiladi)
-    LifecycleResumeEffect(orderId) {
-        container.live.setVisibleOrder(orderId)
+    val shownStatus = state.order?.status
+    LifecycleResumeEffect(orderId, shownStatus) {
+        container.live.setVisibleOrder(orderId, shownStatus)
         onPauseOrDispose { container.live.clearVisibleOrder(orderId) }
     }
 

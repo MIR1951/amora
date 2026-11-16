@@ -3,9 +3,14 @@ package uz.amora.app
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import uz.amora.app.data.LiveEvent
+import uz.amora.app.data.Order
 import uz.amora.app.data.SseMessage
 import uz.amora.app.data.SseParser
+import uz.amora.app.data.changedOrders
+import uz.amora.app.data.isNewerStatus
 import uz.amora.app.data.parseLiveEvent
 import uz.amora.app.notify.orderNotice
 
@@ -92,5 +97,37 @@ class LiveTest {
         // Mijozning o'zi qilgan ishlar uchun bildirishnoma kerak emas
         assertNull(orderNotice(LiveEvent.OrderChanged(7, "new")))
         assertNull(orderNotice(LiveEvent.OrderChanged(7, "cancelled")))
+    }
+
+    @Test
+    fun missedStatusChangesAreFoundOnReload() {
+        // Ulanish uzilib turganda 1-buyurtma yo'lga chiqdi, 2-si yetkazildi, 3-si o'zgarmadi
+        val before = listOf(
+            Order(id = 1, status = "accepted", isActive = true),
+            Order(id = 2, status = "delivering", isActive = true),
+            Order(id = 3, status = "new", isActive = true),
+        )
+        val latest = listOf(
+            Order(id = 4, status = "new", isActive = true), // yangi buyurtma: o'zgarish emas
+            Order(id = 3, status = "new", isActive = true),
+            Order(id = 2, status = "delivered"),
+            Order(id = 1, status = "delivering", isActive = true),
+            Order(id = 0, status = "delivered"), // eski, kuzatilmagan buyurtma
+        )
+        assertEquals(listOf(2, 1), changedOrders(before, latest).map { it.id })
+        assertEquals(emptyList<Order>(), changedOrders(emptyList(), latest))
+        assertEquals(emptyList<Order>(), changedOrders(before, before))
+    }
+
+    @Test
+    fun sameOrOlderStatusIsNotAnnouncedTwice() {
+        assertTrue(isNewerStatus(null, "accepted"))
+        assertTrue(isNewerStatus("accepted", "delivering"))
+        assertTrue(isNewerStatus("new", "rejected"))
+        assertTrue(isNewerStatus("delivering", "delivered"))
+        // Bitta o'zgarish ikki yo'ldan keldi yoki eski javob kechikib yetdi
+        assertFalse(isNewerStatus("delivering", "delivering"))
+        assertFalse(isNewerStatus("delivering", "accepted"))
+        assertFalse(isNewerStatus("delivered", "delivering"))
     }
 }

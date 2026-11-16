@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import signal
 from contextlib import asynccontextmanager, suppress
 
 import httpx
@@ -19,7 +20,9 @@ from app.events import (
     Event,
     EventHub,
     HubFull,
-    asyncpg_dsn,
+    TooManyStreams,
+    asyncpg_connect_args,
+    close_on_stop_signal,
     listen_forever,
 )
 from app.main import create_app
@@ -39,16 +42,28 @@ async def assert_silent(subscription, wait: float = 0.3) -> None:
         await asyncio.wait_for(subscription.get(), timeout=wait)
 
 
+class RecordingHub(EventHub):
+    """Markazdan o'tgan hamma hodisani (begona buyurtmalarnikini ham) yozib boradi."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.published: asyncio.Queue[Event] = asyncio.Queue()
+
+    def publish(self, item: Event) -> None:
+        self.published.put_nowait(item)
+        super().publish(item)
+
+
 @pytest.fixture
 async def live(engine, seed):
-    """Hodisalar markazi, unga ulangan sessiyalar fabrikasi va bitta tinglovchi.
+    """Hodisalar markazi, unga ulangan sessiyalar fabrikasi va markazdan o'tgan hodisalar navbati.
 
     PostgreSQL'da hodisalar baza kanali orqali keladi, shuning uchun kanal tinglovchisi ham
     ishga tushiriladi (haqiqiy serverda buni API jarayoni qiladi).
     """
-    hub = EventHub()
+    hub = RecordingHub()
     factory = make_session_factory(engine, hub)
-    subscription = hub.subscribe()
+    subscription = hub.published
     listener = None
     if IS_POSTGRES:
         listener = asyncio.create_task(listen_forever(TEST_DATABASE_URL, hub))
@@ -145,6 +160,41 @@ async def test_rolled_back_change_is_not_published(live, seed):
     await assert_silent(subscription)
 
 
+async def test_change_inside_rolled_back_savepoint_does_not_swallow_the_next_one(live, seed):
+    _, factory, subscription = live
+    async with factory() as session:
+        product = await session.get(Product, seed["osh"])
+        savepoint = await session.begin_nested()
+        product.is_available = False
+        await session.flush()
+        await savepoint.rollback()  # shu bilan birinchi xabar ham bekor bo'ldi
+        await session.refresh(product)
+        product.price = 99_000
+        await session.commit()
+    assert await next_event(subscription) == Event(MENU)
+    await assert_silent(subscription)
+
+
+async def test_released_savepoint_publishes_only_after_outer_commit(live, seed):
+    _, factory, subscription = live
+    async with factory() as session:
+        product = await session.get(Product, seed["osh"])
+        async with session.begin_nested():
+            product.is_available = False
+        # Savepoint yopildi, lekin tashqi tranzaksiya hali saqlanmagan: boshqalar ko'rmaydi
+        await assert_silent(subscription)
+        await session.commit()
+    assert await next_event(subscription) == Event(MENU)
+    await assert_silent(subscription)
+
+    async with factory() as session:
+        product = await session.get(Product, seed["osh"])
+        async with session.begin_nested():
+            product.is_available = True
+        await session.rollback()  # savepoint yopilgan edi, lekin hammasi bekor qilindi
+    await assert_silent(subscription)
+
+
 async def test_order_lifecycle_publishes_order_events(live, seed):
     _, factory, subscription = live
     order_id, customer_id = await make_order(factory, seed)
@@ -200,9 +250,23 @@ def test_event_json_round_trip_and_garbage():
         assert Event.from_json(garbage) is None
 
 
-def test_asyncpg_dsn_keeps_credentials():
-    dsn = asyncpg_dsn("postgresql+asyncpg://amora:s3cr%40t@db:5432/amora")
-    assert dsn == "postgresql://amora:s3cr%40t@db:5432/amora"
+def test_asyncpg_connect_args_keep_credentials_and_url_options():
+    assert asyncpg_connect_args("postgresql+asyncpg://amora:s3cr%40t@db:5432/amora") == {
+        "host": "db",
+        "port": 5432,
+        "user": "amora",
+        "password": "s3cr@t",
+        "database": "amora",
+        "timeout": 10,
+    }
+    # Manzil oxiridagi sozlamalar: asyncpgniki uzatiladi, SQLAlchemy'ning o'ziniki tashlab yuboriladi
+    args = asyncpg_connect_args(
+        "postgresql+asyncpg://amora@db/amora?ssl=require&prepared_statement_cache_size=0&timeout=3"
+    )
+    assert args["ssl"] == "require"
+    assert args["timeout"] == "3"
+    assert "prepared_statement_cache_size" not in args
+    assert "port" not in args
 
 
 async def test_slow_subscriber_gets_resync_instead_of_growing_queue():
@@ -221,8 +285,80 @@ async def test_hub_limits_subscribers():
     with pytest.raises(HubFull):
         hub.subscribe()
     hub.unsubscribe(first)
+    hub.unsubscribe(first)  # ikki marta bo'shatish hisobni buzmaydi
     assert hub.subscriber_count == 0
     hub.subscribe()
+
+
+async def test_hub_limits_anonymous_streams_per_address():
+    hub = EventHub(max_per_address=2)
+    first = hub.subscribe(address="10.0.0.1")
+    hub.subscribe(address="10.0.0.1")
+    with pytest.raises(TooManyStreams):
+        hub.subscribe(address="10.0.0.1")
+    hub.subscribe(address="10.0.0.2")  # boshqa manzilga aloqasi yo'q
+    hub.subscribe(customer_id=1, address="10.0.0.1")  # kirgan mijoz o'z hisobida
+    hub.unsubscribe(first)
+    hub.subscribe(address="10.0.0.1")
+    assert hub.subscriber_count == 4
+
+
+async def test_extra_stream_of_a_customer_replaces_the_oldest_one():
+    hub = EventHub(max_per_customer=2)
+    first = hub.subscribe(customer_id=7)
+    second = hub.subscribe(customer_id=7)
+    other = hub.subscribe(customer_id=8)
+    third = hub.subscribe(customer_id=7)  # telefon tarmoqni almashtirib, qayta ulandi
+    assert hub.subscriber_count == 3
+    assert await next_event(first) is None  # eng eski ulanish yopildi
+    hub.publish(Event(ORDER, order_id=1, customer_id=7, status="accepted"))
+    assert (await next_event(second)).order_id == 1
+    assert (await next_event(third)).order_id == 1
+    await assert_silent(other, wait=0.05)
+    hub.unsubscribe(first)  # yopilgan ulanish javobi tugaganda: hisob o'zgarmaydi
+    assert hub.subscriber_count == 3
+
+
+async def test_order_event_is_queued_only_for_its_owner():
+    hub = EventHub(queue_size=3)
+    owner = hub.subscribe(customer_id=3)
+    stranger = hub.subscribe(customer_id=4)
+    anonymous = hub.subscribe()
+    for number in range(10):  # gavjum payt: begonalarning navbati to'lib ketmasligi kerak
+        hub.publish(Event(ORDER, order_id=number, customer_id=3, status="accepted"))
+    await assert_silent(stranger, wait=0.05)
+    await assert_silent(anonymous, wait=0.05)
+    assert await next_event(owner) == Event(RESYNC)
+
+
+async def test_closed_hub_ends_streams_and_refuses_new_ones():
+    hub = EventHub()
+    subscription = hub.subscribe()
+    stream = event_stream(subscription, heartbeat=5)
+    assert await anext(stream) == "event: ready\ndata: {}\n\n"
+    hub.publish(Event(MENU))
+    hub.close()
+    hub.publish(Event(MENU))
+    with pytest.raises(StopAsyncIteration):  # navbatdagi xabarlar emas, darhol yopilish
+        await asyncio.wait_for(anext(stream), timeout=1)
+    with pytest.raises(HubFull):
+        hub.subscribe()
+
+
+async def test_stop_signal_closes_hub_and_calls_previous_handler():
+    hub = EventHub()
+    subscription = hub.subscribe()
+    seen: list[int] = []
+    original = signal.signal(signal.SIGTERM, lambda signum, frame: seen.append(signum))
+    try:
+        with close_on_stop_signal(hub):
+            signal.raise_signal(signal.SIGTERM)
+            assert await next_event(subscription, timeout=1) is None
+        assert seen == [signal.SIGTERM]  # avvalgi ishlovchi (uvicornniki) ham chaqirildi
+        signal.raise_signal(signal.SIGTERM)
+        assert seen == [signal.SIGTERM, signal.SIGTERM]  # chiqishda joyiga qaytarildi
+    finally:
+        signal.signal(signal.SIGTERM, original)
 
 
 # ---------- Ilovaga yuboriladigan matn ----------
@@ -251,15 +387,35 @@ def test_reject_reason_is_included_and_unknown_events_are_dropped():
 
 async def test_stream_starts_with_ready_sends_events_and_heartbeats():
     hub = EventHub()
-    stream = event_stream(hub, customer_id=None, heartbeat=0.05)
+    stream = event_stream(hub.subscribe(customer_id=3), heartbeat=0.05)
     assert await anext(stream) == "event: ready\ndata: {}\n\n"
-    assert hub.subscriber_count == 1
     hub.publish(Event(MENU))
     assert await anext(stream) == "event: menu\ndata: {}\n\n"
     hub.publish(Event(ORDER, order_id=1, customer_id=9, status="accepted"))  # begona buyurtma
     assert await anext(stream) == ": ping\n\n"
+    hub.publish(Event(ORDER, order_id=2, customer_id=3, status="accepted"))
+    assert (await anext(stream)).startswith("event: order\n")
     await stream.aclose()
-    assert hub.subscriber_count == 0  # ulanish yopilgach navbat ham tozalanadi
+
+
+async def test_heartbeat_is_not_starved_by_events_the_client_does_not_get():
+    hub = EventHub()
+    stream = event_stream(hub.subscribe(), heartbeat=0.2)
+    assert await anext(stream) == "event: ready\ndata: {}\n\n"
+
+    async def noise() -> None:
+        while True:  # ilovaga yuborilmaydigan hodisalar "ping" oralig'idan tezroq kelib turibdi
+            hub.publish(Event("boshqa"))
+            await asyncio.sleep(0.02)
+
+    task = asyncio.create_task(noise())
+    try:
+        # Sanoq har safar noldan boshlansa, "ping" hech qachon ketmas va ilova ulanishni uzar edi
+        assert await asyncio.wait_for(anext(stream), timeout=1) == ": ping\n\n"
+        assert await asyncio.wait_for(anext(stream), timeout=1) == ": ping\n\n"
+    finally:
+        task.cancel()
+        await stream.aclose()
 
 
 # ---------- Haqiqiy HTTP orqali, boshidan oxirigacha ----------
@@ -395,3 +551,81 @@ async def test_stream_with_unknown_token_still_gets_public_events(cfg, engine, n
             async with http.stream("GET", "/events", headers=headers) as response:
                 assert response.status_code == 200
                 assert (await SseReader(response).next_message())[0] == "ready"
+
+
+async def wait_for_subscribers(hub: EventHub, count: int) -> None:
+    for _ in range(200):
+        if hub.subscriber_count == count:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"{hub.subscriber_count} ta ulanish ochiq, {count} ta kutilgan edi")
+
+
+async def test_closed_connection_frees_its_place(cfg, engine, notifier, seed):
+    async with running_server(cfg, engine, notifier) as (app, base):
+        hub: EventHub = app.state.events
+        async with httpx.AsyncClient(base_url=base, timeout=10) as http:
+            async with http.stream("GET", "/events") as response:
+                assert (await SseReader(response).next_message())[0] == "ready"
+                assert hub.subscriber_count == 1
+            await wait_for_subscribers(hub, 0)
+
+
+async def test_too_many_anonymous_streams_from_one_address_are_refused(
+    cfg, engine, notifier, seed
+):
+    async with running_server(cfg, engine, notifier) as (app, base):
+        hub: EventHub = app.state.events
+        hub._max_per_address = 2
+        async with httpx.AsyncClient(base_url=base, timeout=10) as http:
+            async with (
+                http.stream("GET", "/events") as first,
+                http.stream("GET", "/events") as second,
+            ):
+                assert first.status_code == second.status_code == 200
+                refused = await http.get("/events")
+                assert refused.status_code == 429
+                assert refused.json()["error"]["code"] == "too_many_streams"
+                assert hub.subscriber_count == 2  # rad etilgan so'rov joy egallamadi
+
+                # Kirgan mijoz manzil hisobiga kirmaydi
+                owner = await register(http, phone="90 111 11 11")
+                async with http.stream("GET", "/events", headers=owner) as third:
+                    assert third.status_code == 200
+            await wait_for_subscribers(hub, 0)
+
+
+async def test_stop_signal_ends_open_streams_at_once(cfg, engine, notifier, seed):
+    """`docker stop`: ochiq ulanishlar darhol yopiladi, server kutib o'tirmaydi."""
+    seen: list[int] = []
+    # uvicorn to'xtagach signalni avvalgi ishlovchiga qayta yuboradi: sinov jarayonini
+    # o'ldirmasligi uchun avval zararsiz ishlovchi o'rnatiladi
+    original = signal.signal(signal.SIGTERM, lambda signum, frame: seen.append(signum))
+    try:
+        app = create_app(cfg, engine=engine, notifier=notifier)
+        config = uvicorn.Config(
+            app, host="127.0.0.1", port=0, log_level="warning", timeout_graceful_shutdown=30
+        )
+        server = uvicorn.Server(config)
+        task = asyncio.create_task(server.serve())
+        for _ in range(200):
+            if server.started:
+                break
+            await asyncio.sleep(0.02)
+        assert server.started
+        port = server.servers[0].sockets[0].getsockname()[1]
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}/api/v1") as http:
+            async with http.stream("GET", "/events") as response:
+                lines = response.aiter_lines()
+                assert await asyncio.wait_for(anext(lines), timeout=5) == "event: ready"
+                signal.raise_signal(signal.SIGTERM)
+
+                async def read_to_end() -> None:
+                    async for _ in lines:
+                        pass
+
+                await asyncio.wait_for(read_to_end(), timeout=3)  # oqim toza yopildi
+        await asyncio.wait_for(task, timeout=3)  # 30 soniyalik kutish kerak bo'lmadi
+        assert seen == [signal.SIGTERM]
+    finally:
+        signal.signal(signal.SIGTERM, original)

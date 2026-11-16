@@ -12,7 +12,7 @@ from app.api.deps import SessionDep
 from app.config import Settings, get_settings
 from app.db import make_engine, make_session_factory
 from app.errors import install_error_handlers
-from app.events import EventHub, listen_forever
+from app.events import EventHub, close_on_stop_signal, listen_forever
 from app.notifier import Notifier, NullNotifier
 from app.security import RateLimiter
 
@@ -53,7 +53,8 @@ def create_app(
         listener = None
         if db_engine.dialect.name == "postgresql":
             listener = asyncio.create_task(listen_forever(cfg.database_url, hub))
-        yield
+        with close_on_stop_signal(hub):
+            yield
         if listener is not None:
             listener.cancel()
             with suppress(asyncio.CancelledError):

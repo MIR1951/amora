@@ -29,8 +29,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val container = (application as AmoraApp).container
-        // Ekran aylantirilganda eski bildirishnoma qayta ochilib ketmasin
-        if (savedInstanceState == null) openOrderId = orderIdFrom(intent)
+        // Ekran aylantirilganda yoki ilova "oxirgi ilovalar" ro'yxatidan qayta ochilganda
+        // (tizim eski intentni qayta beradi) avvalgi bildirishnoma qayta ochilib ketmasin
+        val fromRecents = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (savedInstanceState == null && !fromRecents) openOrderId = orderIdFrom(intent)
         setContent {
             AmoraTheme {
                 // testTagsAsResourceId: avtomatik sinov (android/ci/smoke_test.py) elementlarni belgisi orqali topadi

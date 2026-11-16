@@ -390,8 +390,9 @@ def scenario_full():
     shot("09-order-new")
     print("Buyurtma:", visible_texts(), flush=True)
 
-    # Holat jonli ulanish orqali keladi: ekran serverdan o'zi faqat 30 soniyada bir so'raydi,
-    # shuning uchun 15 soniya ichida o'zgarsa, bu server yuborgan xabar tufayli
+    # Bu yerda ekran to'g'ri ko'rsatilishi tekshiriladi. Holat tez kelgani jonli ulanishni
+    # isbotlamaydi (ulanish bo'lmasa, ekran serverdan har 7 soniyada o'zi so'raydi): jonli
+    # yetkazish `check_live_menu` da isbotlanadi, chunki menyu o'zi qayta so'ramaydi.
     staff("accepted")
     wait_for("Tayyorlanmoqda", timeout=15)
     shot("10-order-accepted")

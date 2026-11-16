@@ -19,7 +19,11 @@ Testlardagi SQLite'da `pg_notify` yo'q: u yerda hodisa saqlangandan so'ng to'g'r
 import asyncio
 import json
 import logging
-from contextlib import suppress
+import signal
+import threading
+from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 
 import asyncpg
@@ -78,36 +82,75 @@ def _str_or_none(value) -> str | None:
 
 
 class HubFull(Exception):
-    """Juda ko'p ilova ulanib turibdi."""
+    """Juda ko'p ilova ulanib turibdi (yoki server to'xtayapti)."""
+
+
+class TooManyStreams(Exception):
+    """Bitta manzildan (ro'yxatdan o'tmagan ilovalar) juda ko'p ulanish ochilgan."""
 
 
 class Subscription:
     """Bitta ulangan ilovaning navbati."""
 
-    def __init__(self, size: int):
-        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=size)
+    def __init__(self, size: int, customer_id: int | None, key: tuple[str, object]):
+        self.customer_id = customer_id
+        self.key = key
+        self._queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=size)
+        self._closed = False
 
-    async def get(self) -> Event:
+    async def get(self) -> Event | None:
+        """Keyingi hodisa. None: server to'xtayapti, ulanish yopilishi kerak."""
         return await self._queue.get()
 
+    def _clear(self) -> None:
+        while not self._queue.empty():
+            self._queue.get_nowait()
+
     def _put(self, item: Event) -> None:
+        if self._closed:
+            return
         try:
             self._queue.put_nowait(item)
         except asyncio.QueueFull:
             # Ilova xabarlarni o'qib ulgurmayapti (aloqa sust). Navbatni tozalab, o'rniga
             # bitta "hammasini qayta o'qi" xabarini qoldiramiz: hech narsa yo'qolmaydi.
-            while not self._queue.empty():
-                self._queue.get_nowait()
+            self._clear()
             self._queue.put_nowait(Event(RESYNC))
+
+    def _close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._clear()
+        self._queue.put_nowait(None)
 
 
 class EventHub:
-    """Hodisalarni shu jarayonga ulangan barcha ilovalarga tarqatadi."""
+    """Hodisalarni shu jarayonga ulangan barcha ilovalarga tarqatadi.
 
-    def __init__(self, max_subscribers: int = 2000, queue_size: int = 64):
-        self._subscribers: set[Subscription] = set()
+    Ulanishlar soni cheklangan: jami, bitta mijozga va (ro'yxatdan o'tmaganlar uchun) bitta
+    manzilga. Aks holda bitta kompyuter minglab bo'sh ulanish ochib, qolgan hammani jonli
+    yangilanishlarsiz qoldirishi mumkin edi.
+
+    Mijoz chegaradan oshsa, yangi ulanish rad etilmaydi: uning eng eski ulanishi yopiladi.
+    Telefon Wi-Fi'dan mobil internetga o'tganda eski ulanish server tomonda bir necha daqiqa
+    "tirik" ko'rinib turadi; rad etilganda aynan ishlayotgan yangi ulanish jabr ko'rar edi.
+    """
+
+    def __init__(
+        self,
+        max_subscribers: int = 2000,
+        queue_size: int = 64,
+        max_per_customer: int = 4,
+        max_per_address: int = 60,
+    ):
+        self._subscribers: dict[Subscription, None] = {}  # ochilgan tartibida
+        self._per_key: Counter[tuple[str, object]] = Counter()
         self._max_subscribers = max_subscribers
         self._queue_size = queue_size
+        self._max_per_customer = max_per_customer
+        self._max_per_address = max_per_address
+        self._closed = False
 
     @property
     def subscriber_count(self) -> int:
@@ -117,20 +160,80 @@ class EventHub:
     def is_full(self) -> bool:
         return len(self._subscribers) >= self._max_subscribers
 
-    def subscribe(self) -> Subscription:
-        if self.is_full:
+    def subscribe(self, customer_id: int | None = None, address: str = "") -> Subscription:
+        """Yangi ulanish uchun joy oladi. `address` ro'yxatdan o'tmagan ilovalar uchun hisobga olinadi
+        (bitta uy yoki aloqa operatori manzili ortida ko'p telefon bo'lishi mumkin, chegara shunga yarasha keng).
+        """
+        if self._closed or self.is_full:
             raise HubFull
-        subscription = Subscription(self._queue_size)
-        self._subscribers.add(subscription)
+        key: tuple[str, object]
+        if customer_id is not None:
+            key = ("customer", customer_id)
+            if self._per_key[key] >= self._max_per_customer:
+                oldest = next(item for item in self._subscribers if item.key == key)
+                self.unsubscribe(oldest)
+                oldest._close()
+        else:
+            key = ("address", address)
+            if self._per_key[key] >= self._max_per_address:
+                raise TooManyStreams
+        subscription = Subscription(self._queue_size, customer_id, key)
+        self._subscribers[subscription] = None
+        self._per_key[key] += 1
         return subscription
 
     def unsubscribe(self, subscription: Subscription) -> None:
-        self._subscribers.discard(subscription)
+        if subscription not in self._subscribers:
+            return
+        del self._subscribers[subscription]
+        self._per_key[subscription.key] -= 1
+        if self._per_key[subscription.key] <= 0:
+            del self._per_key[subscription.key]
 
     def publish(self, item: Event) -> None:
         """Faqat asyncio sikli ichidan chaqiriladi."""
         for subscription in tuple(self._subscribers):
+            # Buyurtma haqidagi xabar faqat egasining navbatiga tushadi
+            if item.type == ORDER and item.customer_id != subscription.customer_id:
+                continue
             subscription._put(item)
+
+    def close(self) -> None:
+        """Server to'xtayapti: ochiq ulanishlar toza yopiladi, yangilari qabul qilinmaydi."""
+        self._closed = True
+        for subscription in tuple(self._subscribers):
+            subscription._close()
+
+
+@contextmanager
+def close_on_stop_signal(hub: EventHub) -> Iterator[None]:
+    """To'xtatish signali kelganda (`docker stop`) ochiq oqimlarni darhol yopadi.
+
+    Oqim o'zi hech qachon tugamaydi, uvicorn esa to'xtashdan oldin ochiq so'rovlar tugashini
+    kutadi: shusiz har bir qayta ishga tushirish bir necha soniyaga cho'zilar va har bir ochiq
+    ulanish uchun jurnalga xato yozilar edi. Avval o'rnatilgan ishlovchi (uvicornniki) ham
+    chaqiriladi, chiqishda esa joyiga qaytariladi.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    previous: dict[int, object] = {}
+
+    def on_stop(signum, frame) -> None:
+        loop.call_soon_threadsafe(hub.close)
+        handler = previous.get(signum)
+        if callable(handler):
+            handler(signum, frame)
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous[signum] = signal.signal(signum, on_stop)
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            if handler is not None and signal.getsignal(signum) is on_stop:
+                signal.signal(signum, handler)
 
 
 # ---------- Bazaga yozilgan narsadan hodisa yasash ----------
@@ -178,23 +281,20 @@ def _emit(session: Session, events: list[Event]) -> None:
     """Hodisalarni shu tranzaksiyaga biriktiradi."""
     if not events:
         return
-    pending: dict[str, Event] = session.info.setdefault(_PENDING, {})
-    fresh = []
-    for item in events:
-        payload = item.to_json()
-        if payload not in pending:
-            pending[payload] = item
-            fresh.append(payload)
-    if not fresh:
-        return
     connection = session.connection()
     if connection.dialect.name == "postgresql":
-        # NOTIFY tranzaksiya bilan birga yashaydi: commit bo'lsa jo'naydi, rollback bo'lsa yo'q
-        for payload in fresh:
+        # NOTIFY tranzaksiya bilan birga yashaydi: commit bo'lsa jo'naydi, rollback bo'lsa
+        # (savepoint ichida ham) yo'qoladi. Bir xil xabarlarni baza o'zi bittaga keltiradi,
+        # shuning uchun bu yerda hisob yuritilmaydi.
+        for item in events:
             connection.execute(
                 text("SELECT pg_notify(:channel, :payload)"),
-                {"channel": CHANNEL, "payload": payload},
+                {"channel": CHANNEL, "payload": item.to_json()},
             )
+        return
+    pending: dict[str, Event] = session.info.setdefault(_PENDING, {})
+    for item in events:
+        pending.setdefault(item.to_json(), item)
 
 
 def attach_event_hooks(sync_maker: sessionmaker, hub: EventHub | None = None) -> None:
@@ -223,12 +323,12 @@ def attach_event_hooks(sync_maker: sessionmaker, hub: EventHub | None = None) ->
 
     @event.listens_for(sync_maker, "after_commit")
     def _after_commit(session: Session) -> None:
+        # PostgreSQL'da bu ro'yxat doim bo'sh: hodisalarni baza o'zi yetkazadi (`listen_forever`)
+        if session.in_nested_transaction():
+            return  # savepoint yopildi, xolos: tashqi tranzaksiya hali saqlanmagan
         pending: dict[str, Event] = session.info.pop(_PENDING, {})
-        if not pending or hub is None:
+        if hub is None:
             return
-        bind = session.get_bind()
-        if bind.dialect.name == "postgresql":
-            return  # baza o'zi yetkazadi: `listen_forever`
         for item in pending.values():
             hub.publish(item)
 
@@ -242,15 +342,35 @@ def attach_event_hooks(sync_maker: sessionmaker, hub: EventHub | None = None) ->
 # ---------- PostgreSQL kanalini tinglash ----------
 
 
-def asyncpg_dsn(database_url: str) -> str:
-    """`postgresql+asyncpg://...` manzilini asyncpg tushunadigan ko'rinishga keltiradi."""
-    return make_url(database_url).set(drivername="postgresql").render_as_string(hide_password=False)
+# SQLAlchemy'ning o'ziga tegishli sozlamalar: asyncpg ularni bilmaydi
+_SQLALCHEMY_ONLY = (
+    "prepared_statement_cache_size",
+    "prepared_statement_name_func",
+    "async_creator_fn",
+    "async_fallback",
+)
+
+
+def asyncpg_connect_args(database_url: str) -> dict:
+    """`postgresql+asyncpg://...` manzilidan `asyncpg.connect` uchun parametrlar yasaydi.
+
+    Manzil oxiridagi `?ssl=require` kabi sozlamalar ham xuddi SQLAlchemy uzatganidek uzatiladi:
+    aks holda baza bilan asosiy aloqa ishlab, tinglovchi ulanolmay qolishi mumkin edi.
+    """
+    url = make_url(database_url)
+    args: dict = url.translate_connect_args(username="user")
+    args.update(url.query)
+    for key in _SQLALCHEMY_ONLY:
+        args.pop(key, None)
+    args.setdefault("timeout", 10)
+    return args
 
 
 async def listen_forever(database_url: str, hub: EventHub) -> None:
     """Baza kanalini tinglaydi va hodisalarni ilovalarga uzatadi. Aloqa uzilsa, qayta ulanadi."""
-    dsn = asyncpg_dsn(database_url)
+    connect_args = asyncpg_connect_args(database_url)
     delay = 1.0
+    failures = 0
     while True:
         connection = None
         closed = asyncio.Event()
@@ -264,12 +384,13 @@ async def listen_forever(database_url: str, hub: EventHub) -> None:
             closed.set()
 
         try:
-            connection = await asyncpg.connect(dsn, timeout=10)
+            connection = await asyncpg.connect(**connect_args)
             connection.add_termination_listener(on_close)
             await connection.add_listener(CHANNEL, on_notify)
             # Ulanmagan paytda nimadir o'zgargan bo'lishi mumkin: ilovalar hammasini qayta o'qisin
             hub.publish(Event(RESYNC))
             delay = 1.0
+            failures = 0
             log.info("Jonli yangilanishlar kanali tinglanmoqda")
             while not closed.is_set():
                 with suppress(TimeoutError):
@@ -280,7 +401,11 @@ async def listen_forever(database_url: str, hub: EventHub) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001
-            log.warning("Jonli yangilanishlar kanaliga ulanib bo'lmadi (%s)", error)
+            failures += 1
+            # Birinchi xato baland ovozda yoziladi: ulanish sozlamasi noto'g'ri bo'lsa, ilovalar
+            # "ulandim" deb turadi-yu, hech qanday yangilanish kelmaydi
+            level = logging.ERROR if failures == 1 else logging.WARNING
+            log.log(level, "Jonli yangilanishlar kanaliga ulanib bo'lmadi (%r)", error)
         finally:
             if connection is not None and not connection.is_closed():
                 with suppress(Exception):

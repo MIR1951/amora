@@ -24,6 +24,9 @@ class LiveUpdates(
     private var visibleOrderId: Int? = null
     private var lingerJob: Job? = null
 
+    // Har bir buyurtma bo'yicha mijozga oxirgi bildirilgan (yoki ekranda ko'rsatilgan) holat
+    private val notified = mutableMapOf<Int, String>()
+
     init {
         scope.launch {
             realtime.events.collect { event ->
@@ -36,12 +39,19 @@ class LiveUpdates(
                     LiveEvent.MenuChanged, LiveEvent.ShopChanged -> launch { catalog.refresh() }
 
                     is LiveEvent.OrderChanged -> {
-                        // Mijoz aynan shu buyurtma ekraniga qarab turgan bo'lsa, o'zgarishni
-                        // ekranda ko'radi: bildirishnoma ortiqcha
-                        if (!(foreground && visibleOrderId == event.orderId)) notifier.show(event)
+                        notify(event)
                         launch { refreshActiveOrders() }
                     }
                 }
+            }
+        }
+        // Ulanish uzilib turganda o'tkazib yuborilgan o'zgarish: qayta o'qishda aniqlanadi va
+        // xuddi jonli xabar kelgandek bildiriladi
+        scope.launch {
+            activeOrders.statusChanges.collect { order ->
+                notify(
+                    LiveEvent.OrderChanged(order.id, order.status, order.statusLabel, order.rejectReason),
+                )
             }
         }
         // Mijoz ro'yxatdan o'tdi yoki kalit yangilandi: ulanish yangi kalit bilan qayta o'rnatiladi
@@ -71,9 +81,13 @@ class LiveUpdates(
         }
     }
 
-    /** Mijoz shu buyurtma ekraniga qarab turibdi: u haqidagi bildirishnoma kerak emas. */
-    fun setVisibleOrder(orderId: Int) {
+    /**
+     * Mijoz shu buyurtma ekraniga qarab turibdi: u haqidagi bildirishnoma kerak emas.
+     * [status] ekranda ko'rinib turgan holat: u haqida keyin ham alohida bildirilmaydi.
+     */
+    fun setVisibleOrder(orderId: Int, status: String? = null) {
         visibleOrderId = orderId
+        if (status != null) notified[orderId] = status
         notifier.dismiss(orderId)
     }
 
@@ -87,6 +101,18 @@ class LiveUpdates(
         scope.launch { refreshActiveOrders() }
     }
 
+    /**
+     * Holat o'zgarishi haqida bildiradi. Bitta o'zgarish ikki yo'ldan kelishi mumkin (jonli xabar
+     * va qayta o'qish): ikkinchisi va kechikib kelgan eski holat e'tiborsiz qoldiriladi.
+     */
+    private fun notify(event: LiveEvent.OrderChanged) {
+        if (!isNewerStatus(notified[event.orderId], event.status)) return
+        notified[event.orderId] = event.status
+        // Mijoz aynan shu buyurtma ekraniga qarab turgan bo'lsa, o'zgarishni ekranda ko'radi
+        if (foreground && visibleOrderId == event.orderId) return
+        notifier.show(event)
+    }
+
     private suspend fun refreshActiveOrders() {
         activeOrders.refresh()
         // Orqa fonda kutilayotgan buyurtma qolmadi: ulanishni ushlab turishning hojati yo'q
@@ -97,3 +123,15 @@ class LiveUpdates(
         const val BACKGROUND_LINGER_MS = 20 * 60 * 1000L
     }
 }
+
+// Buyurtma faqat oldinga yuradi: yangi, tayyorlanmoqda, yo'lda, tugadi (yetkazildi yoki bekor bo'ldi)
+private fun statusStep(status: String): Int = when (status) {
+    "new" -> 0
+    "accepted" -> 1
+    "delivering" -> 2
+    else -> 3
+}
+
+/** [status] mijozga oxirgi bildirilgan [last] holatdan keyingi bosqichmi. */
+fun isNewerStatus(last: String?, status: String): Boolean =
+    last == null || statusStep(status) > statusStep(last)

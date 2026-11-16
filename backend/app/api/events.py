@@ -17,7 +17,17 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
 from app.errors import ApiError
-from app.events import MENU, ORDER, RESYNC, SHOP, Event, EventHub, HubFull
+from app.events import (
+    MENU,
+    ORDER,
+    RESYNC,
+    SHOP,
+    Event,
+    EventHub,
+    HubFull,
+    Subscription,
+    TooManyStreams,
+)
 from app.models import STATUS_LABELS, Customer, OrderStatus
 from app.security import hash_token
 
@@ -55,26 +65,52 @@ def client_message(item: Event, customer_id: int | None) -> str | None:
 
 
 async def event_stream(
-    hub: EventHub, customer_id: int | None, heartbeat: float = HEARTBEAT_SECONDS
+    subscription: Subscription, heartbeat: float = HEARTBEAT_SECONDS
 ) -> AsyncIterator[str]:
-    try:
-        subscription = hub.subscribe()
-    except HubFull:
-        return
-    try:
-        # Ilova shu xabarni olgach "ulandim" deb hisoblaydi va ma'lumotni bir marta yangilaydi
-        yield sse("ready")
-        while True:
-            try:
-                item = await asyncio.wait_for(subscription.get(), timeout=heartbeat)
-            except TimeoutError:
-                yield ": ping\n\n"
+    """Bitta ilovaga ketadigan oqim. Navbatni bo'shatish chaqiruvchining ishi (`EventStreamResponse`)."""
+    loop = asyncio.get_running_loop()
+    # Ilova shu xabarni olgach "ulandim" deb hisoblaydi va ma'lumotni bir marta yangilaydi
+    yield sse("ready")
+    # "Ping" oxirgi YUBORILGAN satrdan hisoblanadi: ilovaga tegishli bo'lmagan hodisalar
+    # (boshqalarning buyurtmalari) ulanishni jim qoldirmasligi kerak
+    deadline = loop.time() + heartbeat
+    while True:
+        try:
+            item = await asyncio.wait_for(
+                subscription.get(), timeout=max(0.0, deadline - loop.time())
+            )
+        except TimeoutError:
+            message = ": ping\n\n"
+        else:
+            if item is None:
+                return  # server to'xtayapti
+            message = client_message(item, subscription.customer_id)
+            if message is None:
                 continue
-            message = client_message(item, customer_id)
-            if message is not None:
-                yield message
-    finally:
-        hub.unsubscribe(subscription)
+        yield message
+        deadline = loop.time() + heartbeat
+
+
+class EventStreamResponse(StreamingResponse):
+    """Oqim tugagach (ilova uzildi, server to'xtadi yoki javob umuman boshlanmadi) navbatni bo'shatadi."""
+
+    def __init__(self, hub: EventHub, subscription: Subscription):
+        super().__init__(
+            event_stream(subscription),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",  # nginx xabarlarni ushlab turmasin
+            },
+        )
+        self._hub = hub
+        self._subscription = subscription
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._hub.unsubscribe(self._subscription)
 
 
 @router.get(
@@ -110,11 +146,14 @@ async def stream_events(
                 )
             )
 
-    return StreamingResponse(
-        event_stream(hub, customer_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",  # nginx xabarlarni ushlab turmasin
-        },
-    )
+    # Joy shu yerda, javob qaytarilishidan oldin olinadi: tekshiruv va band qilish bitta qadam
+    address = request.client.host if request.client else ""
+    try:
+        subscription = hub.subscribe(customer_id=customer_id, address=address)
+    except HubFull:
+        raise ApiError(503, "busy", "Server band. Birozdan keyin qayta urinib ko'ring") from None
+    except TooManyStreams:
+        raise ApiError(
+            429, "too_many_streams", "Juda ko'p ulanish ochilgan. Birozdan keyin qayta urinib ko'ring"
+        ) from None
+    return EventStreamResponse(hub, subscription)

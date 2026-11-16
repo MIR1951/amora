@@ -17,5 +17,7 @@ USER amora
 
 EXPOSE 8000
 
-# Avval baza sxemasi yangilanadi, keyin server ishga tushadi
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app_factory --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 5"]
+# Avval baza sxemasi yangilanadi, keyin server ishga tushadi. `exec`: server konteynerning asosiy
+# jarayoni bo'ladi va `docker stop` signalini o'zi oladi (aks holda signal qobiqda qolib ketadi,
+# server toza to'xtamaydi va Docker uni 10 soniyadan keyin majburan o'chiradi).
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app_factory --factory --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 5"]

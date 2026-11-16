@@ -98,6 +98,8 @@ class OrderNotifier(context: Context) {
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // Android 7 da kanal yo'q: ovoz va tebranish shu yerda so'ralmasa, xabar jim keladi
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .build()
         try {
