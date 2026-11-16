@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
 import uz.amora.app.data.Address
 import uz.amora.app.data.ApiException
+import uz.amora.app.data.LiveEvent
 import uz.amora.app.data.OrderIn
 import uz.amora.app.data.Quote
 import uz.amora.app.data.toCartItems
@@ -55,6 +56,13 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 _state.update { it.copy(quoteLoading = true) }
                 delay(QUOTE_DEBOUNCE_MS) // tugma ketma-ket bosilganda faqat oxirgi holat so'raladi
                 loadQuote(request)
+            }
+        }
+        // Savat ochiq turganda menyu yoki kafe sozlamalari o'zgarsa (taom tugadi, narx o'zgardi,
+        // kafe yopildi), summa va ogohlantirishlar serverdan qayta so'raladi
+        viewModelScope.launch {
+            container.realtime.events.collect { event ->
+                if (event !is LiveEvent.OrderChanged) refreshQuote()
             }
         }
     }
@@ -121,6 +129,9 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 val created = container.account.withAuth { container.api.createOrder(order) }
                 orderFingerprint = ""
                 container.cart.clear()
+                // Yangi buyurtma darhol "faol buyurtmalar"ga qo'shiladi: bosh sahifadagi belgi va
+                // bildirishnomalar shunga tayanadi
+                container.live.orderPlaced()
                 _state.update { it.copy(submitting = false, comment = "", createdOrderId = created.id) }
             } catch (e: ApiException) {
                 _state.update { it.copy(submitting = false, submitError = e.message) }

@@ -67,6 +67,7 @@ import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
 import uz.amora.app.R
 import uz.amora.app.data.ApiException
+import uz.amora.app.data.LiveEvent
 import uz.amora.app.data.Order
 import uz.amora.app.data.OrderStatus
 import uz.amora.app.data.resolveImageUrl
@@ -105,6 +106,15 @@ data class OrdersUiState(
 class OrdersViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(OrdersUiState())
     val state: StateFlow<OrdersUiState> = _state.asStateFlow()
+
+    init {
+        // Buyurtma holati o'zgargani haqida jonli xabar kelsa, ro'yxat o'zi yangilanadi
+        viewModelScope.launch {
+            container.realtime.events.collect { event ->
+                if (event is LiveEvent.OrderChanged || event == LiveEvent.Resync) reload()
+            }
+        }
+    }
 
     /** Birinchi sahifani qayta yuklaydi. `byUser`: mijoz ekranni pastga tortdi. */
     fun reload(byUser: Boolean = false) {

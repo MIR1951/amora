@@ -4,6 +4,7 @@
     backend_ctl.py prepare                    rasmli namuna menyu, kecha-kunduz ish vaqti, yetkazish shartlari
     backend_ctl.py status latest accepted     oxirgi buyurtmani keyingi holatga o'tkazadi
     backend_ctl.py status latest rejected "Sabab"
+    backend_ctl.py product "Lag'mon" off      taomni "tugadi" deb belgilaydi (on: yana sotuvda)
 
 Kafe xodimi Telegram'da bosadigan tugmalar o'rnini bosadi. Faqat sinov bazasi bilan ishlatiladi:
 AMORA_DATABASE_URL sinov bazasini ko'rsatib turishi kerak.
@@ -129,10 +130,25 @@ async def set_status(target: str, status: str, reason: str | None) -> None:
     await engine.dispose()
 
 
+async def set_product(name: str, available: bool) -> None:
+    """Admin botdagi "tugadi" tugmasi o'rnida: taomni sotuvdan oladi yoki qaytaradi."""
+    engine = make_engine(guard())
+    async with make_session_factory(engine)() as session:
+        product = await session.scalar(select(Product).where(Product.name == name))
+        if product is None:
+            raise SystemExit(f"Bunday taom yo'q: {name}")
+        product.is_available = available
+        await session.commit()
+        print(f"Taom {name!r}: {'sotuvda' if available else 'tugadi'}")
+    await engine.dispose()
+
+
 def main() -> None:
     args = sys.argv[1:]
     if args[:1] == ["prepare"]:
         asyncio.run(prepare())
+    elif args[:1] == ["product"] and len(args) == 3 and args[2] in ("on", "off"):
+        asyncio.run(set_product(args[1], args[2] == "on"))
     elif args[:1] == ["status"] and len(args) >= 3:
         asyncio.run(set_status(args[1], args[2], args[3] if len(args) > 3 else None))
     else:

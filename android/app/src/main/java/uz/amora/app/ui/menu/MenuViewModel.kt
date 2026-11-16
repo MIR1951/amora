@@ -8,12 +8,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
-import uz.amora.app.data.ApiException
 import uz.amora.app.data.Order
 
 class MenuViewModel(private val container: AppContainer) : ViewModel() {
-    private val _activeOrders = MutableStateFlow<List<Order>>(emptyList())
-    val activeOrders: StateFlow<List<Order>> = _activeOrders.asStateFlow()
+    // Faol buyurtmalar butun ilova uchun bitta joyda turadi: jonli xabar kelganda ham yangilanadi
+    val activeOrders: StateFlow<List<Order>> = container.activeOrders.orders
 
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
@@ -38,7 +37,7 @@ class MenuViewModel(private val container: AppContainer) : ViewModel() {
             _refreshing.value = true
             try {
                 container.catalog.refresh()
-                loadActiveOrders()
+                container.activeOrders.refresh()
             } finally {
                 _refreshing.value = false
             }
@@ -46,18 +45,9 @@ class MenuViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun refreshActiveOrders() {
-        viewModelScope.launch { loadActiveOrders() }
+        viewModelScope.launch { container.activeOrders.refresh() }
     }
 
-    private suspend fun loadActiveOrders() {
-        if (container.session.token == null) {
-            _activeOrders.value = emptyList()
-            return
-        }
-        try {
-            _activeOrders.value = container.api.orders(limit = 5).orders.filter { it.isActive }
-        } catch (e: ApiException) {
-            if (e.isUnauthorized) _activeOrders.value = emptyList()
-        }
-    }
+    /** Jonli ulanish ishlab turibdimi: ishlasa, serverdan tez-tez so'rab turish shart emas. */
+    val liveConnected: Boolean get() = container.realtime.connected.value
 }

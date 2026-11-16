@@ -137,6 +137,7 @@ import uz.amora.app.util.formatNumber
 import uz.amora.app.util.formatSum
 
 private const val ACTIVE_ORDERS_REFRESH_MS = 15_000L
+private const val ACTIVE_ORDERS_LIVE_REFRESH_MS = 60_000L
 
 // Qidiruv maydoni menyu shunchadan katta bo'lsagina ko'rinadi: bir nechta taomda u ortiqcha
 private const val SEARCH_MIN_PRODUCTS = 6
@@ -200,7 +201,9 @@ fun MenuScreen(
             vm.refreshCatalog()
             while (true) {
                 vm.refreshActiveOrders()
-                delay(ACTIVE_ORDERS_REFRESH_MS)
+                // Jonli ulanish ishlayotgan bo'lsa, o'zgarish haqida server o'zi xabar beradi:
+                // bu so'rov faqat ehtiyot chorasi bo'lib qoladi
+                delay(if (vm.liveConnected) ACTIVE_ORDERS_LIVE_REFRESH_MS else ACTIVE_ORDERS_REFRESH_MS)
             }
         }
     }

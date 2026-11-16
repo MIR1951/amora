@@ -1,16 +1,18 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import APIRouter, FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.api import customers, menu, orders
+from app.api import customers, events, menu, orders
 from app.api.deps import SessionDep
 from app.config import Settings, get_settings
 from app.db import make_engine, make_session_factory
 from app.errors import install_error_handlers
+from app.events import EventHub, close_on_stop_signal, listen_forever
 from app.notifier import Notifier, NullNotifier
 from app.security import RateLimiter
 
@@ -28,7 +30,8 @@ def create_app(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     db_engine = engine or make_engine(cfg.database_url)
-    session_factory = make_session_factory(db_engine)
+    hub = EventHub()
+    session_factory = make_session_factory(db_engine, hub)
 
     telegram_notifier = None
     if notifier is None:
@@ -46,7 +49,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
+        # Bot boshqa jarayonda ishlaydi: uning o'zgarishlari baza kanali orqali yetib keladi
+        listener = None
+        if db_engine.dialect.name == "postgresql":
+            listener = asyncio.create_task(listen_forever(cfg.database_url, hub))
+        with close_on_stop_signal(hub):
+            yield
+        if listener is not None:
+            listener.cancel()
+            with suppress(asyncio.CancelledError):
+                await listener
         if telegram_notifier is not None:
             await telegram_notifier.close()
         if engine is None:  # o'zimiz yaratgan bo'lsak, o'zimiz yopamiz
@@ -61,6 +73,7 @@ def create_app(
     app.state.settings = cfg
     app.state.engine = db_engine
     app.state.session_factory = session_factory
+    app.state.events = hub
     app.state.notifier = notifier
     app.state.register_limiter = RateLimiter(cfg.register_limit_per_hour)
 
@@ -76,6 +89,7 @@ def create_app(
     api.include_router(menu.router)
     api.include_router(customers.router)
     api.include_router(orders.router)
+    api.include_router(events.router)
     app.include_router(api)
 
     cfg.media_dir.mkdir(parents=True, exist_ok=True)

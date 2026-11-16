@@ -10,6 +10,8 @@ full      CI ichida ishlayotgan SINOV serveriga qaratilgan APK uchun. Buyurtma b
           kafe xodimining tugmalari o'rnini backend_ctl.py bosadi: qabul qilish, yo'lga
           chiqish, yetkazish, rad etish. Mijoz tomonidan bekor qilish va qayta buyurtma
           berish ham tekshiriladi. Haqiqiy serverga qaratilgan APK bilan ISHLATILMAYDI.
+          Jonli yangilanish ham shu yerda tekshiriladi: serverdagi o'zgarish ilovada hech
+          narsa bosilmasdan ko'rinishi va buyurtma holati haqida bildirishnoma chiqishi kerak.
 """
 
 import json
@@ -195,15 +197,79 @@ def tap_scrolling(needle, attempts=6):
     raise RuntimeError(f"Ekranda topilmadi (surib ko'rilganda ham): {needle!r}")
 
 
-def staff(status, reason=None):
-    """Sinov serverida oxirgi buyurtmaning holatini o'zgartiradi (kafe xodimi o'rnida)."""
-    command = [sys.executable, str(Path(__file__).with_name("backend_ctl.py")), "status", "latest", status]
-    if reason:
-        command.append(reason)
+def backend(*args):
+    """Sinov serverida kafe xodimi yoki admin o'rnida biror ish qiladi (backend_ctl.py)."""
+    command = [sys.executable, str(Path(__file__).with_name("backend_ctl.py")), *args]
     result = subprocess.run(command, capture_output=True, text=True, timeout=60)
     print(f"[kafe] {result.stdout.strip()}", flush=True)
     if result.returncode != 0:
         raise RuntimeError(f"backend_ctl: {result.stderr.strip()[-2000:]}")
+
+
+def staff(status, reason=None):
+    """Sinov serverida oxirgi buyurtmaning holatini o'zgartiradi (kafe xodimi o'rnida)."""
+    backend("status", "latest", status, *([reason] if reason else []))
+
+
+def wait_gone(needle, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if find(needle) is None:
+            return
+        time.sleep(1)
+    raise RuntimeError(f"Ekrandan yo'qolmadi: {needle!r}")
+
+
+def check_live_menu():
+    """Jonli yangilanish: admin taomni "tugadi" deb belgilaydi, ilovada hech narsa bosilmaydi.
+
+    Menyu ekrani serverdan o'zi qayta so'ramaydi, shuning uchun yozuv faqat server yuborgan
+    xabar tufayli paydo bo'lishi mumkin.
+    """
+    if find("Tugagan"):
+        raise RuntimeError("Sinov boshida ekranda tugagan taom bo'lmasligi kerak")
+    backend("product", "Lag'mon", "off")
+    wait_for("Tugagan", timeout=20)
+    shot("01a-live-menu")
+    backend("product", "Lag'mon", "on")
+    wait_gone("Tugagan", timeout=20)
+    print("Jonli yangilanish: menyu o'zi yangilandi", flush=True)
+
+
+def notification_shown(text):
+    """Tizimda shu matnli Amora bildirishnomasi turibdimi."""
+    out = adb("shell", "dumpsys", "notification", "--noredact", check=False).decode(errors="replace")
+    return f"pkg={PACKAGE}" in out and text in out
+
+
+def wait_notification(text, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if notification_shown(text):
+            return
+        time.sleep(1)
+    raise RuntimeError(f"Bildirishnoma chiqmadi: {text!r}")
+
+
+def open_order_from_notification(title, on_screen):
+    """Bildirishnomani bosib, buyurtma ekrani ochilishini tekshiradi.
+
+    Bildirishnomalar pardasi tizimga tegishli va emulyatorda ba'zan sekin ochiladi: bu qadam
+    o'xshamasa, sinov to'xtamaydi, buyurtma bosh sahifadagi belgi orqali ochiladi.
+    """
+    try:
+        adb("shell", "cmd", "statusbar", "expand-notifications")
+        time.sleep(2)
+        shot("11b-notification")
+        tap(title, timeout=15)
+        wait_for(on_screen, timeout=20)
+        print("Bildirishnoma bosildi: buyurtma ochildi", flush=True)
+    except RuntimeError as error:
+        print(f"[ogohlantirish] bildirishnomani bosib bo'lmadi: {error}", flush=True)
+        adb("shell", "cmd", "statusbar", "collapse", check=False)
+        time.sleep(2)
+        tap("Buyurtma №")
+        wait_for(on_screen, timeout=20)
 
 
 def visible_texts():
@@ -313,6 +379,10 @@ def scenario_full():
     except RuntimeError:
         raise RuntimeError("Ilova sinov serveriga ulanmagan: buyurtma berilmaydi") from None
 
+    wait_for("so'm", timeout=90)
+    time.sleep(3)  # jonli ulanish o'rnatilib ulgursin
+    check_live_menu()
+
     fill_cart()
 
     # 1-buyurtma: kafe qabul qiladi, kuryer yo'lga chiqadi, yetkazadi
@@ -320,23 +390,30 @@ def scenario_full():
     shot("09-order-new")
     print("Buyurtma:", visible_texts(), flush=True)
 
+    # Bu yerda ekran to'g'ri ko'rsatilishi tekshiriladi. Holat tez kelgani jonli ulanishni
+    # isbotlamaydi (ulanish bo'lmasa, ekran serverdan har 7 soniyada o'zi so'raydi): jonli
+    # yetkazish `check_live_menu` da isbotlanadi, chunki menyu o'zi qayta so'ramaydi.
     staff("accepted")
-    wait_for("Tayyorlanmoqda", timeout=40)  # ilova holatni 7 soniyada bir so'raydi
+    wait_for("Tayyorlanmoqda", timeout=15)
     shot("10-order-accepted")
 
-    # Menyudagi "faol buyurtma" belgisi va undan buyurtmaga qaytish
+    # Menyudagi "faol buyurtma" belgisi
     back()
     wait_for("Buyurtma №", timeout=40)
     shot("11-menu-active-order")
-    tap("Buyurtma №")
-    wait_for("Kafe qabul qildi")
 
+    # Mijoz boshqa ekranda turganda holat o'zgaradi: belgi o'zi yangilanadi va bildirishnoma chiqadi
     staff("delivering")
-    wait_for("Kuryer yo'lda", timeout=40)
+    time.sleep(1.5)
+    (OUT / "11a-notification-popup.png").write_bytes(adb("exec-out", "screencap", "-p"))
+    wait_notification("Kuryer yo'lda")
+    wait_for("Kuryer yo'lda", timeout=20)
+    print("Jonli yangilanish: bosh sahifadagi buyurtma belgisi o'zi yangilandi", flush=True)
+    open_order_from_notification("Kuryer yo'lda", "Kuryer buyurtmangizni olib")
     shot("12-order-delivering")
 
     staff("delivered")
-    wait_for("Yoqimli ishtaha", timeout=40)
+    wait_for("Yoqimli ishtaha", timeout=15)
     shot("13-order-delivered")
     print("Yetkazilgan buyurtma:", visible_texts(), flush=True)
 
@@ -366,7 +443,7 @@ def scenario_full():
     wait_for("Buyurtma berish ·", timeout=60)  # savat ochildi
     place_order()
     staff("rejected", "Mahsulot tugadi")
-    wait_for("Rad etildi", timeout=40)
+    wait_for("Rad etildi", timeout=15)
     wait_for("Mahsulot tugadi")
     shot("18-order-rejected")
 
@@ -450,7 +527,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
 
     adb("install", "-r", apk)
-    for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"):
+    # Bildirishnoma ruxsati oldindan beriladi: tizimning ruxsat oynasi sinovni to'sib qo'ymasin
+    for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"):
         adb("shell", "pm", "grant", PACKAGE, f"android.permission.{permission}")
     latitude, longitude = customer_location(TEST_SERVER if mode == "full" else live_server())
     adb("emu", "geo", "fix", f"{longitude:.5f}", f"{latitude:.5f}", check=False)  # avval uzunlik, keyin kenglik
