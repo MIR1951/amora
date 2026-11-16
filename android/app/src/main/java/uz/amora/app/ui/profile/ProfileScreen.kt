@@ -68,7 +68,10 @@ import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
 import uz.amora.app.ui.components.glassSource
 import uz.amora.app.ui.components.rememberGlassState
+import uz.amora.app.ui.components.rememberNotificationSwitch
 import uz.amora.app.ui.theme.hint
+import uz.amora.app.ui.theme.info
+import uz.amora.app.ui.theme.infoContainer
 import uz.amora.app.ui.theme.ink
 import uz.amora.app.ui.theme.success
 import uz.amora.app.ui.theme.successContainer
@@ -102,6 +105,7 @@ fun ProfileScreen(
     val profile = container.session.profile.collectAsStateWithLifecycle().value
     val address = container.session.address.collectAsStateWithLifecycle().value
     val shop = container.catalog.state.collectAsStateWithLifecycle().value.shop
+    val notifications = rememberNotificationSwitch(container)
 
     // Saqlangan profil o'zgarsa (masalan, savat orqali tahrirlangan bo'lsa), maydonlar ham yangilanadi
     var name by rememberSaveable(profile) { mutableStateOf(profile?.name ?: "") }
@@ -250,6 +254,17 @@ fun ProfileScreen(
                             tileTint = scheme.success,
                         )
                     }
+                    // Buyurtma holati haqidagi xabarlar: o'chiq bo'lsa, shu yerdan yoqiladi
+                    RowDivider()
+                    LinkRow(
+                        icon = R.drawable.ic_bell,
+                        label = "Bildirishnomalar",
+                        value = if (notifications.enabled) "Yoqilgan" else "O'chirilgan. Yoqish uchun bosing",
+                        highlighted = !notifications.enabled,
+                        onClick = notifications.toggle,
+                        tileContainer = scheme.infoContainer,
+                        tileTint = scheme.info,
+                    )
                 }
 
                 Text(

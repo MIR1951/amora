@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -80,9 +81,11 @@ import kotlinx.coroutines.launch
 import uz.amora.app.AppContainer
 import uz.amora.app.R
 import uz.amora.app.data.ApiException
+import uz.amora.app.data.LiveEvent
 import uz.amora.app.data.Order
 import uz.amora.app.data.OrderStatus
 import uz.amora.app.ui.components.BigButton
+import uz.amora.app.ui.components.AskNotificationPermissionOnce
 import uz.amora.app.ui.components.BottomDock
 import uz.amora.app.ui.components.ConfirmDialog
 import uz.amora.app.ui.components.GlassTopBar
@@ -112,8 +115,12 @@ import uz.amora.app.util.formatPhone
 import uz.amora.app.util.formatSum
 import uz.amora.app.util.formatTime
 
-// Buyurtma tugallanmagan bo'lsa, holati shuncha vaqtda bir marta serverdan so'raladi
+// Buyurtma holati o'zgarsa, server jonli ulanish orqali o'zi xabar beradi. Ulanish uzilgan
+// bo'lsa (yoki server eski bo'lsa), holat shuncha vaqtda bir marta so'rab turiladi.
 private const val POLL_INTERVAL_MS = 7_000L
+
+// Jonli ulanish ishlab turganda bu so'rov faqat ehtiyot chorasi
+private const val POLL_INTERVAL_LIVE_MS = 30_000L
 
 data class OrderUiState(
     val loading: Boolean = true,
@@ -128,6 +135,19 @@ data class OrderUiState(
 class OrderViewModel(private val container: AppContainer, private val orderId: Int) : ViewModel() {
     private val _state = MutableStateFlow(OrderUiState())
     val state: StateFlow<OrderUiState> = _state.asStateFlow()
+
+    /** Jonli ulanish ishlab turibdimi: ishlasa, serverdan tez-tez so'rab turish shart emas. */
+    val liveConnected: Boolean get() = container.realtime.connected.value
+
+    init {
+        // Shu buyurtma haqida jonli xabar keldi: holat darhol qayta o'qiladi
+        viewModelScope.launch {
+            container.realtime.events.collect { event ->
+                val mine = event is LiveEvent.OrderChanged && event.orderId == orderId
+                if (mine || event == LiveEvent.Resync) refresh()
+            }
+        }
+    }
 
     /** Buyurtmani serverdan qayta o'qiydi. Xato bo'lsa, avval yuklangan ma'lumot ekranda qoladi. */
     suspend fun refresh() {
@@ -224,10 +244,19 @@ fun OrderScreen(
                 vm.refresh()
                 val order = vm.state.value.order
                 if (order != null && !order.isActive) break
-                delay(POLL_INTERVAL_MS)
+                delay(if (vm.liveConnected) POLL_INTERVAL_LIVE_MS else POLL_INTERVAL_MS)
             }
         }
     }
+
+    // Mijoz shu buyurtmaga qarab turibdi: u haqidagi bildirishnoma ko'rsatilmaydi (va bori yopiladi)
+    LifecycleResumeEffect(orderId) {
+        container.live.setVisibleOrder(orderId)
+        onPauseOrDispose { container.live.clearVisibleOrder(orderId) }
+    }
+
+    // Birinchi faol buyurtmada bildirishnomaga ruxsat so'raladi: "qabul qilindi", "kuryer yo'lda"
+    if (state.order?.isActive == true) AskNotificationPermissionOnce(container)
 
     val message = state.message
     LaunchedEffect(message) {

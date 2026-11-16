@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavHostController
@@ -42,8 +43,23 @@ private object Routes {
  * Hamma o'tish bir xil: yangi ekran o'ngdan sirpanib kiradi, orqaga qaytganda o'ngga chiqib ketadi.
  */
 @Composable
-fun AmoraNavHost(container: AppContainer) {
+fun AmoraNavHost(
+    container: AppContainer,
+    openOrderId: Int? = null,
+    onOrderOpened: () -> Unit = {},
+) {
     val nav = rememberNavController()
+
+    // Bildirishnoma bosildi: o'sha buyurtma ochiladi, undan "orqaga" menyuga qaytaradi
+    LaunchedEffect(openOrderId) {
+        if (openOrderId != null) {
+            nav.navigate(Routes.order(openOrderId)) {
+                popUpTo(Routes.MENU)
+                launchSingleTop = true
+            }
+            onOrderOpened()
+        }
+    }
 
     NavHost(
         navController = nav,

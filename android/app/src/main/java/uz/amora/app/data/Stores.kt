@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Mijozning ismi va telefoni. Telefon har doim `+998XXXXXXXXX` ko'rinishida. */
 data class Profile(val name: String, val phone: String)
@@ -28,14 +30,25 @@ class SessionStore(context: Context) {
     private val _address = MutableStateFlow(readAddress())
     val address: StateFlow<Address?> = _address.asStateFlow()
 
+    private val _tokenFlow = MutableStateFlow(prefs.getString(KEY_TOKEN, null))
+
+    /** Kirish kaliti o'zgarganda jonli ulanish yangi kalit bilan qayta o'rnatiladi. */
+    val tokenFlow: StateFlow<String?> = _tokenFlow.asStateFlow()
+
     val token: String?
-        get() = prefs.getString(KEY_TOKEN, null)
+        get() = _tokenFlow.value
 
     fun saveToken(token: String?) {
         val editor = prefs.edit()
         if (token == null) editor.remove(KEY_TOKEN) else editor.putString(KEY_TOKEN, token)
         editor.apply()
+        _tokenFlow.value = token
     }
+
+    /** Bildirishnomaga ruxsat bir marta so'ralgan: mijoz rad etsa, qayta-qayta bezovta qilinmaydi. */
+    var notificationsAsked: Boolean
+        get() = prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, value).apply()
 
     fun saveProfile(profile: Profile) {
         prefs.edit()
@@ -74,6 +87,7 @@ class SessionStore(context: Context) {
         const val KEY_LATITUDE = "latitude"
         const val KEY_LONGITUDE = "longitude"
         const val KEY_NOTE = "address_note"
+        const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
     }
 }
 
@@ -155,19 +169,54 @@ class Catalog(private val api: ApiClient) {
     private val _state = MutableStateFlow(CatalogState(loading = true))
     val state: StateFlow<CatalogState> = _state.asStateFlow()
 
+    private val refreshLock = Mutex()
+    private var requested = 0L
+    private var completed = 0L
+
+    /**
+     * Menyu va kafe ma'lumotini serverdan qayta o'qiydi.
+     *
+     * Bir vaqtda bir nechta so'rov kelsa (ekran ochildi, jonli xabar keldi), ular navbat bilan
+     * bajariladi va ortiqchasi tashlab yuboriladi: har bir chaqiruv o'zidan KEYIN boshlangan
+     * o'qish tugashini kutadi, shuning uchun eskirgan ma'lumot ustiga yozilib qolmaydi.
+     */
     suspend fun refresh(showLoading: Boolean = false) {
+        val wanted = ++requested
         if (showLoading || _state.value.menu == null) {
             _state.update { it.copy(loading = true, error = null) }
         }
-        try {
-            coroutineScope {
-                val shop = async { api.shop() }
-                val menu = async { api.menu() }
-                _state.value = CatalogState(shop = shop.await(), menu = menu.await())
+        refreshLock.withLock {
+            if (completed >= wanted) return
+            val covers = requested
+            try {
+                coroutineScope {
+                    val shop = async { api.shop() }
+                    val menu = async { api.menu() }
+                    _state.value = CatalogState(shop = shop.await(), menu = menu.await())
+                }
+            } catch (e: ApiException) {
+                // Avval yuklangan menyu bo'lsa, u ekranda qolaveradi
+                _state.update { it.copy(loading = false, error = e.message) }
             }
+            completed = covers
+        }
+    }
+}
+
+/** Mijozning tugallanmagan buyurtmalari: bosh sahifadagi belgi va bildirishnomalar shunga tayanadi. */
+class ActiveOrders(private val api: ApiClient, private val session: SessionStore) {
+    private val _orders = MutableStateFlow<List<Order>>(emptyList())
+    val orders: StateFlow<List<Order>> = _orders.asStateFlow()
+
+    suspend fun refresh() {
+        if (session.token == null) {
+            _orders.value = emptyList()
+            return
+        }
+        try {
+            _orders.value = api.orders(limit = 5).orders.filter { it.isActive }
         } catch (e: ApiException) {
-            // Avval yuklangan menyu bo'lsa, u ekranda qolaveradi
-            _state.update { it.copy(loading = false, error = e.message) }
+            if (e.isUnauthorized) _orders.value = emptyList()
         }
     }
 }

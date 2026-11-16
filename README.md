@@ -63,8 +63,23 @@ Barcha manzillar `/api/v1` bilan boshlanadi. To'liq interaktiv hujjat server ish
 | `GET /orders` | Buyurtmalarim |
 | `GET /orders/{id}` | Buyurtma holati |
 | `POST /orders/{id}/cancel` | Bekor qilish |
+| `GET /events` | Jonli yangilanishlar oqimi (Server-Sent Events) |
 
 Token kerak bo'lgan so'rovlarda `Authorization: Bearer <token>` sarlavhasi yuboriladi.
+
+### Jonli yangilanishlar
+
+Ilova ochiq turganda `GET /events` ga bitta doimiy ulanish ushlab turadi. Bazada biror narsa o'zgarsa (admin botda taomni "tugadi" deb belgiladi, narxni o'zgartirdi, kafeni to'xtatdi, xodim buyurtmani qabul qildi), server shu ulanish orqali qisqa xabar yuboradi va ilova kerakli ma'lumotni o'zi qayta o'qiydi: sahifani yangilash shart emas.
+
+| Xabar | Ma'nosi |
+|---|---|
+| `ready` | Ulanish o'rnatildi |
+| `menu` | Menyu o'zgardi: `GET /menu` qayta o'qiladi |
+| `shop` | Kafe sozlamalari o'zgardi: `GET /shop` qayta o'qiladi |
+| `order` | Mijozning buyurtmasi holati o'zgardi (`order_id`, `status`, `status_label`). Faqat token yuborilgan bo'lsa va faqat buyurtma egasiga keladi |
+| `resync` | Ba'zi xabarlar o'tkazib yuborilgan bo'lishi mumkin: hammasi qayta o'qiladi |
+
+Qanday ishlaydi (`backend/app/events.py`): API ham, bot ham bazaga bitta umumiy joydan yozadi va har bir yozuv o'zi hodisaga aylanadi, kodda buni alohida chaqirish shart emas. Bot va API alohida jarayonlar bo'lgani uchun hodisa PostgreSQL'ning `NOTIFY` kanali orqali uzatiladi: tranzaksiya saqlansa yetib boradi, bekor bo'lsa yo'qoladi. Har 20 soniyada ulanishga bo'sh "ping" satri yuboriladi. Oldinda turgan proksi (Caddy, nginx) bu javobni ushlab turmasligi kerak; Caddy buni o'zi biladi, nginx uchun `X-Accel-Buffering: no` sarlavhasi yuboriladi.
 
 Xatolar bir xil ko'rinishda qaytadi. `message` mijozga to'g'ridan-to'g'ri ko'rsatish uchun o'zbekcha yozilgan:
 
@@ -131,7 +146,8 @@ Qanday ishlaydi:
 
 - Mijoz menyuni ro'yxatdan o'tmasdan ko'radi. Birinchi buyurtma paytida ism va telefon so'raladi, server bergan kalit telefonda saqlanadi.
 - Xarita OpenStreetMap: kalit ham, to'lov ham kerak emas. Joylashuv Google xizmatlarisiz, telefonning o'z GPS'i orqali aniqlanadi.
-- Buyurtma ochiq turganda uning holati har 7 soniyada serverdan so'raladi. Ilova yopiq paytda bildirishnoma (push) hozircha yo'q.
+- Ilova ochiq turganda server bilan jonli ulanish ushlab turiladi (`data/Realtime.kt`, `data/LiveUpdates.kt`): menyu, kafe holati, faol buyurtmalar va ochiq turgan buyurtma ekrani serverdagi o'zgarishdan keyin o'zi yangilanadi. Ulanish uzilsa, ilova o'zi qayta ulanadi va shu orada avvalgidek vaqti-vaqti bilan so'rab turadi (buyurtma holati har 7 soniyada).
+- Buyurtma holati o'zgarganda bildirishnoma chiqadi (`notify/OrderNotifier.kt`), bosilsa o'sha buyurtma ochiladi. Ruxsat birinchi buyurtmadan keyin so'raladi, keyin profil sahifasidagi "Bildirishnomalar" qatoridan boshqariladi. Bildirishnoma jonli ulanishga tayanadi: ilova ochiq yoki yaqinda orqa fonga o'tgan bo'lsa keladi. Ilova butunlay yopiq paytda ham kelishi uchun Firebase (FCM) kerak, u hali ulanmagan.
 - Har bir buyurtmaga takrorlanmas raqam biriktiriladi: internet uzilib, buyurtma qayta yuborilsa ham u ikkilanmaydi.
 
 Server manzili bitta joyda turadi: `android/gradle.properties` dagi `amora.apiBaseUrl`. Domen o'zgarsa faqat shu qator almashtiriladi.
@@ -167,6 +183,7 @@ backend/
     telegram/     bot: buyurtma xabari, tugmalar, admin bo'limi
     bot.py        botni ishga tushirish (python -m app.bot)
     notifier.py   yangi buyurtma haqida xabar berish
+    events.py     jonli yangilanishlar: bazadagi o'zgarishni ilovalarga yetkazish
   migrations/     baza sxemasi o'zgarishlari
   tests/
 android/
