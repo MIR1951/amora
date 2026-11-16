@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -90,6 +91,7 @@ import uz.amora.app.ui.theme.hint
 import uz.amora.app.util.formatDateTime
 
 private const val PAGE_SIZE = 20
+private const val COMPACT_WIDTH_DP = 380
 
 data class OrdersUiState(
     val loading: Boolean = true,
@@ -115,7 +117,17 @@ class OrdersViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 val page = container.api.orders(limit = PAGE_SIZE, offset = 0)
-                _state.value = OrdersUiState(loading = false, orders = page.orders, hasMore = page.hasMore)
+                // "Yana ko'rsatish" bilan yuklangan eski buyurtmalar ro'yxatda qoladi:
+                // buyurtmani ochib qaytgan mijoz ro'yxatni yana boshidan varaqlamaydi
+                _state.update { old ->
+                    val freshIds = page.orders.mapTo(HashSet()) { it.id }
+                    val tail = old.orders.filter { it.id !in freshIds }
+                    OrdersUiState(
+                        loading = false,
+                        orders = page.orders + tail,
+                        hasMore = if (tail.isEmpty()) page.hasMore else old.hasMore,
+                    )
+                }
             } catch (e: ApiException) {
                 if (e.isUnauthorized) {
                     _state.value = OrdersUiState(loading = false)
@@ -314,6 +326,8 @@ private fun OrderCard(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
+    // Tor ekranda holat belgisi sarlavha ostiga tushadi, aks holda u sarlavhani siqib qo'yadi
+    val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
     SectionCard(onClick = onClick, padding = 14.dp, modifier = modifier) {
         Row(verticalAlignment = Alignment.Top) {
             ProductImage(
@@ -336,6 +350,13 @@ private fun OrderCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (compact) {
+                    StatusChip(
+                        status = order.status,
+                        label = order.statusLabel,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
+                    )
+                }
                 Text(
                     text = order.items.joinToString(", ") { "${it.quantity}× ${it.name}" },
                     style = MaterialTheme.typography.bodySmall,
@@ -344,12 +365,14 @@ private fun OrderCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            StatusChip(
-                status = order.status,
-                label = order.statusLabel,
-                modifier = Modifier.widthIn(max = 136.dp),
-            )
+            if (!compact) {
+                Spacer(Modifier.width(8.dp))
+                StatusChip(
+                    status = order.status,
+                    label = order.statusLabel,
+                    modifier = Modifier.widthIn(max = 136.dp),
+                )
+            }
         }
 
         val reason = order.rejectReason

@@ -238,15 +238,18 @@ fun OrderScreen(
     }
 
     val order = state.order
+    // Pastki panel bor paytda u tizim tugmalari uchun joyni o'zi qoldiradi
+    val docked = order != null && !order.isActive
+    val systemBarSpace = if (docked) Modifier else Modifier.navigationBarsPadding()
 
     Scaffold(
         containerColor = scheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { GlassTopBar(glass = glass, title = "Buyurtma №$orderId", onBack = onBack) },
-        snackbarHost = { SnackbarHost(snackbar, modifier = Modifier.navigationBarsPadding()) },
+        snackbarHost = { SnackbarHost(snackbar, modifier = systemBarSpace) },
         bottomBar = {
             // Tugagan buyurtmani bir bosishda takrorlash mumkin
-            if (order != null && !order.isActive) {
+            if (docked) {
                 BottomDock(glass = glass) {
                     BigButton(
                         text = "Yana shunday buyurtma berish",
@@ -285,7 +288,7 @@ fun OrderScreen(
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                         .padding(start = 16.dp, end = 16.dp, top = top, bottom = bottom)
-                        .navigationBarsPadding()
+                        .then(systemBarSpace)
                         .padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {

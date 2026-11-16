@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -141,6 +143,9 @@ fun CartScreen(
         (quote == null || (quote.deliveryFee == 0) == (itemsTotal >= freeFrom))
 
     val active = cart.isNotEmpty() && createdOrderId == null
+    // Klaviatura ochiq paytda pastki tugma yashirinadi: yozilayotgan izoh uning ortida qolib ketmaydi
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val docked = active && !keyboardOpen
 
     Scaffold(
         modifier = Modifier.imePadding(),
@@ -164,9 +169,12 @@ fun CartScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar, modifier = Modifier.navigationBarsPadding()) },
+        snackbarHost = {
+            // Pastki panel bor paytda u tizim tugmalari uchun joyni o'zi qoldiradi
+            SnackbarHost(snackbar, modifier = if (docked) Modifier else Modifier.navigationBarsPadding())
+        },
         bottomBar = {
-            if (active) {
+            if (docked) {
                 BottomDock(glass = glass) {
                     when {
                         address == null -> BigButton(text = "Manzilni tanlang", onClick = onPickAddress)

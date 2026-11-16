@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeChildScope
@@ -55,12 +56,13 @@ private fun glassStyle(tone: GlassTone): HazeStyle {
         val fallback: Color
         when (tone) {
             GlassTone.Light -> {
-                tint = if (scheme.isDark) scheme.surface.copy(alpha = 0.62f) else Color.White.copy(alpha = 0.60f)
+                // Tungi mavzuda xira qatlam quyuqroq: ostidagi xarita doim yorug', matn o'qilishi kerak
+                tint = if (scheme.isDark) scheme.surface.copy(alpha = 0.88f) else Color.White.copy(alpha = 0.60f)
                 fallback = scheme.surface.copy(alpha = 0.95f)
             }
 
             GlassTone.Dark -> {
-                tint = scheme.ink.copy(alpha = 0.74f)
+                tint = scheme.ink.copy(alpha = 0.84f)
                 fallback = scheme.ink.copy(alpha = 0.96f)
             }
 
@@ -153,5 +155,10 @@ fun GlassStrip(glass: HazeState, modifier: Modifier = Modifier, fade: GlassFade 
         val configure: HazeChildScope.() -> Unit = { this.mask = mask }
         configure
     }
-    Box(modifier = modifier.hazeChild(glass, glassStyle(GlassTone.Fog), block))
+    // Bo'sh `pointerInput`: panelning bo'sh joyiga bosilganda bosish ostidagi ro'yxatga o'tib ketmaydi
+    Box(
+        modifier = modifier
+            .hazeChild(glass, glassStyle(GlassTone.Fog), block)
+            .pointerInput(Unit) {},
+    )
 }

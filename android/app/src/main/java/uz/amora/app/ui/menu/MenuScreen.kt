@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -309,7 +310,7 @@ fun MenuScreen(
 }
 
 private fun shopStatusLine(shop: Shop): String = when {
-    !shop.isAcceptingOrders -> "Hozir buyurtma qabul qilinmayapti"
+    !shop.isAcceptingOrders -> "Buyurtma olinmayapti"
     !shop.isOpen -> "Yopiq · ${shop.openTime}–${shop.closeTime}"
     shop.openTime == shop.closeTime -> "Ochiq · kecha-kunduz"
     else -> "Ochiq · ${shop.openTime}–${shop.closeTime}"
@@ -450,15 +451,29 @@ private fun MenuContent(
         indexes
     }
     // Ro'yxatdagi element joylashuvi yuqori satr ostidagi chiziqdan hisoblanadi (0 = satr osti)
-    val currentSection by remember(headerIndexes, pinnedChipsPx) {
+    val scrolledSection by remember(headerIndexes, pinnedChipsPx) {
         derivedStateOf {
-            // Qotib turgan bo'limlar qatori ostidan ko'rinib turgan birinchi element qaysi bo'limda?
-            val first = gridState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.offset.y + it.size.height > pinnedChipsPx }
-            val index = first?.index ?: gridState.firstVisibleItemIndex
-            headerIndexes.indexOfLast { it <= index }.coerceAtLeast(0)
+            if (!gridState.canScrollForward && gridState.canScrollBackward) {
+                // Ro'yxat oxiriga yetdi: oxirgi bo'lim qisqa bo'lsa ham u belgilanadi
+                headerIndexes.lastIndex.coerceAtLeast(0)
+            } else {
+                // Qotib turgan bo'limlar qatori ostidan ko'rinib turgan birinchi element qaysi bo'limda?
+                val first = gridState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.offset.y + it.size.height > pinnedChipsPx }
+                val index = first?.index ?: gridState.firstVisibleItemIndex
+                headerIndexes.indexOfLast { it <= index }.coerceAtLeast(0)
+            }
         }
     }
+    // Bo'lim tugmasi bosilganda aynan o'sha bo'lim belgilanadi (ro'yxat u yergacha surila olmasa ham).
+    // Mijoz ro'yxatni o'zi sura boshlashi bilan yana surilish joyiga qarab aniqlanadi.
+    var tappedSection by remember(headerIndexes) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(gridState) {
+        gridState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) tappedSection = null
+        }
+    }
+    val currentSection = tappedSection ?: scrolledSection
     val chipsPinned by remember(chipsIndex) {
         derivedStateOf {
             if (chipsIndex < 0) {
@@ -472,6 +487,7 @@ private fun MenuContent(
     val selectSection: (Int) -> Unit = { index ->
         val target = headerIndexes.getOrNull(index)
         if (target != null) {
+            tappedSection = index
             scope.launch { gridState.animateScrollToItem(target, scrollOffset = -pinnedChipsPx) }
         }
     }

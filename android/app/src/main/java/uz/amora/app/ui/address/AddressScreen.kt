@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -103,7 +104,6 @@ import uz.amora.app.ui.components.fieldColors
 import uz.amora.app.ui.components.glassSource
 import uz.amora.app.ui.components.rememberGlassState
 import uz.amora.app.ui.theme.amber
-import uz.amora.app.ui.theme.hint
 import uz.amora.app.util.distanceKm
 
 // Manzil hali tanlanmagan va kafe joylashuvi ham kiritilmagan bo'lsa, xarita shu yerdan ochiladi
@@ -122,9 +122,11 @@ private val TOP_CONTROLS = 60.dp
 private val SHEET_CORNER = 32.dp
 private val PIN_HEAD = 46.dp
 private val PIN_STEM = 18.dp
+private val PIN_GROUND = 6.dp
 
 // Xarita surilishi shuncha vaqt to'xtab tursa, belgi joyiga "qo'nadi"
 private const val PIN_SETTLE_MS = 220L
+private const val ZOOM_NOTICE = "Xaritani yaqinlashtirib, yetkazish joyini aniqroq belgilang."
 
 /**
  * Yetkazish manzilini tanlash. Xarita butun ekranni egallaydi va suriladi; belgi turgan joy manzil bo'ladi.
@@ -228,6 +230,8 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
             override fun onZoom(event: ZoomEvent?): Boolean {
                 center = pinPoint()
                 moving = true
+                // Xarita yetarlicha yaqinlashtirilgach, shu haqdagi ogohlantirish o'chadi
+                if (notice == ZOOM_NOTICE && mapView.zoomLevelDouble >= MIN_CONFIRM_ZOOM) notice = null
                 return false
             }
         }
@@ -264,7 +268,14 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_RESUME -> {
+                    mapView.onResume()
+                    // Sozlamalardan GPS yoqib qaytilgan bo'lsa, ogohlantirish yo'qoladi
+                    if (locationOff && finder.isEnabled()) {
+                        locationOff = false
+                        notice = null
+                    }
+                }
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 else -> Unit
             }
@@ -340,7 +351,7 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     val confirm: () -> Unit = {
         if (mapView.zoomLevelDouble < MIN_CONFIRM_ZOOM) {
             locationOff = false
-            notice = "Xaritani yaqinlashtirib, yetkazish joyini aniqroq belgilang."
+            notice = ZOOM_NOTICE
         } else {
             val point = pinPoint()
             container.session.saveAddress(Address(point.latitude, point.longitude, note.trim()))
@@ -375,7 +386,7 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
                     // Belgining uchi (pastki nuqtasi) aynan tanlangan joyni ko'rsatadi
                     val placeable = measurable.measure(constraints)
                     layout(placeable.width, placeable.height) {
-                        placeable.place(0, pinOffsetPx - placeable.height / 2)
+                        placeable.place(0, pinOffsetPx - placeable.height / 2 + PIN_GROUND.roundToPx())
                     }
                 },
         )
@@ -518,11 +529,12 @@ private fun MapPin(moving: Boolean, modifier: Modifier = Modifier) {
                     .background(ink),
             )
         }
-        // Belgi ko'tarilganda ham aynan qaysi nuqta tanlanayotgani ko'rinib turadi
+        // Belgi ko'tarilganda ham aynan qaysi nuqta tanlanayotgani ko'rinib turadi.
+        // Soya oyoqning uchi bilan bir nuqtada turadi: oyoq uchi tanlangan joyning o'zi.
         Box(
             modifier = Modifier
-                .offset(y = 3.dp)
-                .size(width = 12.dp, height = 6.dp)
+                .offset(y = -PIN_GROUND / 2)
+                .size(width = 12.dp, height = PIN_GROUND)
                 .clip(RoundedCornerShape(50))
                 .background(Color.Black.copy(alpha = 0.26f)),
         )
@@ -541,7 +553,7 @@ private fun MapHint(
     val scheme = MaterialTheme.colorScheme
     GlassBox(
         glass = glass,
-        modifier = modifier,
+        modifier = modifier.pointerInput(Unit) {},
         shape = RoundedCornerShape(16.dp),
         tone = GlassTone.Dark,
         elevation = 8.dp,
@@ -599,7 +611,10 @@ private fun AddressSheet(
     val scheme = MaterialTheme.colorScheme
     GlassBox(
         glass = glass,
-        modifier = Modifier.fillMaxWidth(),
+        // Panelning bo'sh joyiga bosilganda ostidagi xarita surilib ketmaydi
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {},
         shape = RoundedCornerShape(topStart = SHEET_CORNER, topEnd = SHEET_CORNER),
         elevation = 20.dp,
     ) {
@@ -629,7 +644,7 @@ private fun AddressSheet(
                         Text(
                             text = if (outOfZone) "Yetkazish hududidan tashqarida" else "Xaritada belgilangan joy",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (outOfZone) scheme.error else scheme.hint,
+                            color = if (outOfZone) scheme.error else scheme.onSurfaceVariant,
                             maxLines = 1,
                         )
                     }

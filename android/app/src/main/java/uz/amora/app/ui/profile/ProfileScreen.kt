@@ -124,6 +124,9 @@ fun ProfileScreen(
         }
     }
 
+    // Pastki panel bor paytda u tizim tugmalari uchun joyni o'zi qoldiradi
+    val systemBarSpace = if (quickEdit) Modifier else Modifier.navigationBarsPadding()
+
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = scheme.background,
@@ -135,7 +138,7 @@ fun ProfileScreen(
                 onBack = onBack,
             )
         },
-        snackbarHost = { SnackbarHost(snackbar, modifier = Modifier.navigationBarsPadding()) },
+        snackbarHost = { SnackbarHost(snackbar, modifier = systemBarSpace) },
         bottomBar = {
             if (quickEdit) {
                 BottomDock(glass = glass) {
@@ -155,7 +158,7 @@ fun ProfileScreen(
                     top = padding.calculateTopPadding(),
                     bottom = padding.calculateBottomPadding(),
                 )
-                .navigationBarsPadding()
+                .then(systemBarSpace)
                 .padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
