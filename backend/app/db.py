@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import DateTime
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import TypeDecorator
 
@@ -46,5 +46,13 @@ def make_engine(url: str) -> AsyncEngine:
     return create_async_engine(url, pool_pre_ping=True)
 
 
-def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False)
+def make_session_factory(engine: AsyncEngine, hub=None) -> async_sessionmaker[AsyncSession]:
+    """Sessiyalar fabrikasi. Har bir yozuv jonli yangilanish hodisasiga aylanadi (`app/events.py`).
+
+    `hub` (`EventHub`) faqat API jarayonida beriladi; bot hodisalarni baza orqali jo'natadi.
+    """
+    from app.events import attach_event_hooks  # modellar shu fayldan `Base`ni oladi
+
+    sync_maker = sessionmaker(expire_on_commit=False)
+    attach_event_hooks(sync_maker, hub)
+    return async_sessionmaker(engine, expire_on_commit=False, sync_session_class=sync_maker)
