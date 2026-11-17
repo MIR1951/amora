@@ -66,4 +66,6 @@ async def get_shop_info(session: SessionDep, cfg: CfgDep) -> ShopOut:
         max_delivery_km=shop.max_delivery_km,
         cafe_latitude=shop.cafe_latitude,
         cafe_longitude=shop.cafe_longitude,
+        banner_title=shop.banner_title,
+        banner_text=shop.banner_text,
     )

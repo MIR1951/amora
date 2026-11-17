@@ -117,6 +117,12 @@ class Order(Base):
 
     items_total: Mapped[int] = mapped_column(Integer)
     delivery_fee: Mapped[int] = mapped_column(Integer)
+    # Promokod yoki birinchi buyurtma aksiyasi bo'yicha chegirma (faqat taomlarga)
+    discount: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    promo_id: Mapped[int | None] = mapped_column(
+        ForeignKey("promo_codes.id", ondelete="SET NULL"), nullable=True
+    )
+    promo_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
     total: Mapped[int] = mapped_column(Integer)
     distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -208,6 +214,45 @@ class ShopSettings(Base):
     daily_report_to: Mapped[str] = mapped_column(String(10), default="group", server_default="group")
     # Oxirgi yuborilgan kunlik hisobot qaysi ish kuni oxiriga tegishli (ikki marta ketmasligi uchun)
     daily_report_sent_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    # Ilovadagi bosh sahifa banneri. Bo'sh bo'lsa ilova yetkazish shartlarini ko'rsatadi
+    banner_title: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    banner_text: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class PromoKind(StrEnum):
+    PERCENT = "percent"  # foiz
+    AMOUNT = "amount"  # aniq summa (so'm)
+
+
+class PromoCode(Base):
+    """Promokod yoki (is_auto) kod kiritmasdan beriladigan birinchi buyurtma chegirmasi."""
+
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
+    is_auto: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(10))
+    value: Mapped[int] = mapped_column(Integer)
+    max_discount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_order: Mapped[int] = mapped_column(Integer, default=0)
+    first_order_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    usage_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    def discount_for(self, items_total: int) -> int:
+        if self.kind == PromoKind.PERCENT.value:
+            amount = items_total * self.value // 100
+            if self.max_discount:
+                amount = min(amount, self.max_discount)
+        else:
+            amount = self.value
+        return max(0, min(amount, items_total))
 
 
 class StaffRole(StrEnum):

@@ -46,6 +46,8 @@ class Report:
     revenue: int = 0  # yetkazilganlarning jami summasi (kuryer olib kelgan naqd pul)
     items_revenue: int = 0
     delivery_revenue: int = 0
+    discounts: int = 0  # yetkazilganlarga berilgan chegirmalar
+    promo_orders: int = 0
     new_customers: int = 0
     returning_customers: int = 0
     top_products: list[tuple[str, int, int]] = field(default_factory=list)  # nom, soni, summa
@@ -115,6 +117,7 @@ async def build_report(
                 Order.total,
                 Order.items_total,
                 Order.delivery_fee,
+                Order.discount,
                 Order.phone,
                 Order.reject_reason,
                 Order.created_at,
@@ -126,7 +129,7 @@ async def build_report(
     hours: Counter = Counter()
     reasons: Counter = Counter()
     phones: set[str] = set()
-    for status, total, items_total, delivery_fee, phone, reason, created_at in rows:
+    for status, total, items_total, delivery_fee, discount, phone, reason, created_at in rows:
         report.orders += 1
         report.by_status[OrderStatus(status)] += 1
         phones.add(phone)
@@ -136,6 +139,9 @@ async def build_report(
             report.revenue += total
             report.items_revenue += items_total
             report.delivery_revenue += delivery_fee
+            if discount:
+                report.discounts += discount
+                report.promo_orders += 1
         elif status == OrderStatus.REJECTED.value:
             reasons[reason or "Sababsiz"] += 1
 

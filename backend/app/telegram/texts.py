@@ -5,6 +5,7 @@ from html import escape as _html_escape
 from zoneinfo import ZoneInfo
 
 from app.models import STATUS_LABELS, Order, OrderStatus, Product, ShopSettings, Staff
+from app.services import promos
 from app.services.orders import CUSTOMER_ACTOR
 from app.services.reports import Report
 from app.services.shop import format_sum
@@ -76,6 +77,8 @@ def order_text(order: Order, tz_name: str) -> str:
     lines.append(f"Taomlar: {format_sum(order.items_total)}")
     delivery = format_sum(order.delivery_fee) if order.delivery_fee else "bepul"
     lines.append(f"Yetkazish: {delivery}")
+    if order.discount:
+        lines.append(f"🎉 Chegirma ({escape(order.promo_code or '')}): −{format_sum(order.discount)}")
     lines.append(f"<b>Jami: {format_sum(order.total)}</b> (naqd)")
     lines.append("")
 
@@ -253,6 +256,10 @@ def report_text(report: Report, tz_name: str, compare_title: str | None = None) 
             f"yetkazish {format_sum(report.delivery_revenue)}",
             f"🧮 O'rtacha chek: {format_sum(report.average_check)}",
         ]
+        if report.discounts:
+            lines.append(
+                f"🎉 Chegirmalar: {format_sum(report.discounts)} ({report.promo_orders} ta buyurtma)"
+            )
     if compare_title and report.previous_revenue is not None:
         lines.append(
             f"📈 {compare_title.capitalize()} nisbatan: "
@@ -376,3 +383,141 @@ def invite_text(link: str, role: str, hours: int) -> str:
         f"Havolani faqat o'sha odamga yuboring. U havolani bosib, botda <b>Start</b> ni "
         f"bossa, {who} bo'lib qo'shiladi. Havola {hours} soat amal qiladi va faqat bir marta ishlaydi."
     )
+
+
+# ---------- Aksiyalar ----------
+
+BANNER_TITLE_MAX = 40
+BANNER_TEXT_MAX = 80
+DEFAULT_BANNER = "Yetkazish narxi va bepul yetkazish sharti (ilova o'zi yozadi)"
+
+
+def promo_status(promo, now: datetime) -> str:
+    if not promo.is_active:
+        return "⏸ to'xtatilgan"
+    if promo.expires_at is not None and promo.expires_at <= now:
+        return "⌛️ muddati tugagan"
+    if promo.usage_limit is not None and promo.used_count >= promo.usage_limit:
+        return "🔚 soni tugagan"
+    return "🟢 ishlayapti"
+
+
+def promo_menu_text(shop: ShopSettings, auto, codes: list, now: datetime) -> str:
+    lines = ["🎉 <b>Aksiyalar</b>", ""]
+    if shop.banner_title or shop.banner_text:
+        lines.append(f"🖼 Banner: <b>{escape(shop.banner_title or '')}</b> {escape(shop.banner_text or '')}")
+    else:
+        lines.append("🖼 Banner: standart (yetkazish narxi)")
+    if auto is not None and auto.is_active:
+        lines.append(f"🆕 Birinchi buyurtma: {promos.describe(auto)}")
+    else:
+        lines.append("🆕 Birinchi buyurtma chegirmasi: yo'q")
+    lines.append("")
+    if codes:
+        lines.append("Promokodlar:")
+        for promo in codes:
+            lines.append(
+                f"• <code>{promo.code}</code> {promos.describe(promo)} · {promo_status(promo, now)}"
+            )
+    else:
+        lines.append("Promokodlar hali yo'q.")
+    return "\n".join(lines)
+
+
+def banner_screen_text(shop: ShopSettings) -> str:
+    title = shop.banner_title
+    text = shop.banner_text
+    return "\n".join(
+        [
+            "🖼 <b>Bosh sahifadagi banner</b>",
+            "",
+            "Ilovada menyuning tepasidagi katta yozuv.",
+            "",
+            f"Sarlavha: <b>{escape(title) if title else 'standart'}</b>",
+            f"Pastki matn: {escape(text) if text else 'standart'}",
+            "",
+            f"Standart holatda: {DEFAULT_BANNER}.",
+            "O'zgarish ilovada darhol ko'rinadi.",
+        ]
+    )
+
+
+def banner_prompt(field: str) -> str:
+    if field == "title":
+        return (
+            f"Banner sarlavhasini yozing (ko'pi bilan {BANNER_TITLE_MAX} ta harf).\n"
+            "Ikki qatorga bo'lish uchun yangi qatordan yozing. Masalan:\n"
+            "<i>Birinchi buyurtmaga\n−15% chegirma</i>\n\n"
+            "Standartga qaytarish uchun <code>-</code> yuboring."
+        )
+    return (
+        f"Pastki matnni yozing (ko'pi bilan {BANNER_TEXT_MAX} ta harf). Masalan:\n"
+        "<i>Promokod: AMORA10</i>\n\n"
+        "Standartga qaytarish uchun <code>-</code> yuboring."
+    )
+
+
+def auto_promo_text(auto, given: int, total: int) -> str:
+    lines = ["🆕 <b>Birinchi buyurtma chegirmasi</b>", ""]
+    lines.append(
+        "Ilovadan birinchi marta buyurtma berayotgan mijozga kod kiritmasdan o'zi beriladi. "
+        "Telefon raqami bo'yicha tekshiriladi."
+    )
+    lines.append("")
+    if auto is not None and auto.is_active:
+        lines.append(f"Hozir: <b>{promos.describe(auto)}</b>")
+    else:
+        lines.append("Hozir: <b>o'chiq</b>")
+    if given:
+        lines.append(f"Berilgan: {given} ta buyurtma, jami {format_sum(total)}")
+    lines.append("")
+    lines.append("Bannerga ham yozib qo'ysangiz, mijozlar ko'radi.")
+    return "\n".join(lines)
+
+
+AUTO_PROMO_PROMPT = (
+    "Chegirmani yozing:\n"
+    "<code>15%</code> — taomlar summasidan 15%\n"
+    "<code>15% 30000</code> — 15%, lekin ko'pi bilan 30 000 so'm\n"
+    "<code>20000</code> — 20 000 so'm\n"
+    "<code>0</code> — o'chirish"
+)
+
+
+def promo_card_text(promo, given: int, total: int, now: datetime, tz_name: str) -> str:
+    lines = [f"🎟 <b>{promo.code}</b> · {promo_status(promo, now)}", ""]
+    lines.append(f"Chegirma: {promos.describe(promo)}")
+    if promo.min_order:
+        lines.append(f"Eng kam buyurtma: {format_sum(promo.min_order)}")
+    lines.append("Kim uchun: " + ("faqat birinchi buyurtma" if promo.first_order_only else "hamma"))
+    lines.append("Har bir mijoz bir marta ishlata oladi.")
+    limit = f"{promo.usage_limit} tadan" if promo.usage_limit is not None else "cheklanmagan"
+    lines.append(f"Ishlatildi: {promo.used_count} ({limit})")
+    if promo.expires_at is not None:
+        expires = promo.expires_at.astimezone(ZoneInfo(tz_name))
+        lines.append(f"Muddati: {expires:%d.%m.%Y %H:%M} gacha")
+    if given:
+        lines.append(f"Berilgan chegirma: {format_sum(total)} ({given} ta buyurtma)")
+    return "\n".join(lines)
+
+
+PROMO_WIZARD = {
+    "code": (
+        "Promokod nomini yozing: lotin harflari va raqamlar, 3–20 ta belgi.\n"
+        "Masalan: <code>AMORA10</code>"
+    ),
+    "discount": AUTO_PROMO_PROMPT.replace("\n<code>0</code> — o'chirish", ""),
+    "min_order": (
+        "Eng kam buyurtma summasi qancha bo'lsin? Masalan: <code>50000</code>\n"
+        "Cheklov kerak bo'lmasa <code>0</code> yuboring."
+    ),
+    "limit": (
+        "Promokod nechta buyurtmaga ishlasin? Masalan: <code>100</code>\n"
+        "Cheklov kerak bo'lmasa <code>0</code> yuboring."
+    ),
+    "days": (
+        "Necha kun amal qilsin? Masalan: <code>7</code>\n"
+        "Muddatsiz bo'lsa <code>0</code> yuboring."
+    ),
+    "audience": "Kim ishlata oladi?",
+}

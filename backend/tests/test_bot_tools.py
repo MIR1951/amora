@@ -353,7 +353,7 @@ def person(user_id: int, name: str) -> User:
 
 async def invite(driver, role_label: str) -> str:
     await driver.say("/start")
-    await driver.press("Adminlar va xodimlar")
+    await driver.press("Xodimlar")
     await driver.press(role_label)
     screen = driver.screen
     assert "https://t.me/amora_test_bot?start=inv_" in screen
@@ -440,7 +440,7 @@ async def test_admin_can_add_staff_but_not_admins(driver, seed, tg, session_fact
         await session.commit()
 
     await start_as(driver, NEW_PERSON)
-    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodimlar", user_id=NEW_PERSON)
     screen = driver.screen
     assert "Egasi" in screen and "Admin · Vali" in screen and "Xodim · Sardor" in screen
     assert "➕ Admin qo'shish" not in driver.buttons
@@ -452,7 +452,7 @@ async def test_admin_can_add_staff_but_not_admins(driver, seed, tg, session_fact
     assert "faqat egasi" in tg.of_type(AnswerCallbackQuery)[-1].text
 
     await start_as(driver, NEW_PERSON)
-    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("🗑 Sardor", user_id=NEW_PERSON)
     await driver.press("Ha, olib tashlansin", user_id=NEW_PERSON)
     assert "Olib tashlandi" in str(tg.of_type(AnswerCallbackQuery)[-1].text)
@@ -468,7 +468,7 @@ async def test_owner_removes_admin(driver, seed, session_factory):
         session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
         await session.commit()
     await driver.say("/start")
-    await driver.press("Adminlar va xodimlar")
+    await driver.press("Xodimlar")
     await driver.press("🗑 Vali")
     assert "Vali (admin) botdan olib tashlansinmi?" in driver.screen
     await driver.press("Ha, olib tashlansin")
@@ -498,13 +498,13 @@ async def test_removed_admins_invites_stop_working(driver, seed, session_factory
         session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
         await session.commit()
     await start_as(driver, NEW_PERSON)
-    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
     payload = driver.screen.split("start=", 1)[1].split()[0]
 
     # Egasi adminni olib tashlaydi: u yaratgan havola ham ishlamay qoladi
     await driver.say("/start")
-    await driver.press("Adminlar va xodimlar")
+    await driver.press("Xodimlar")
     await driver.press("🗑 Vali")
     await driver.press("Ha, olib tashlansin")
     await start_as(driver, NEW_PERSON, payload)
@@ -520,7 +520,7 @@ async def test_invite_from_demoted_inviter_is_refused(driver, seed, session_fact
         session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
         await session.commit()
     await start_as(driver, NEW_PERSON)
-    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
     payload = driver.screen.split("start=", 1)[1].split()[0]
     async with session_factory() as session:

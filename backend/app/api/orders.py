@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Query, Response
 
-from app.api.deps import CfgDep, CustomerDep, NotifierDep, SessionDep
+from app.api.deps import CfgDep, CustomerDep, NotifierDep, OptionalCustomerDep, SessionDep
 from app.errors import ApiError
 from app.models import ACTIVE_STATUSES, STATUS_LABELS, Order, OrderStatus
 from app.notifier import safe_notify
@@ -33,6 +33,8 @@ def order_out(order: Order) -> OrderOut:
         items=[OrderItemOut.model_validate(item) for item in order.items],
         items_total=order.items_total,
         delivery_fee=order.delivery_fee,
+        discount=order.discount,
+        promo_code=order.promo_code,
         total=order.total,
         customer_name=order.customer_name,
         phone=order.phone,
@@ -55,12 +57,19 @@ def order_out(order: Order) -> OrderOut:
 
 
 @router.post("/orders/quote", response_model=QuoteOut, summary="Savatni hisoblash")
-async def quote(data: QuoteIn, session: SessionDep, cfg: CfgDep) -> QuoteOut:
+async def quote(
+    data: QuoteIn, session: SessionDep, cfg: CfgDep, customer: OptionalCustomerDep
+) -> QuoteOut:
     """Savat summasi, yetkazish narxi va buyurtma berish mumkinligini qaytaradi.
 
     Buyurtma berib bo'lmasa `can_order: false` va sababi `problems` ichida bo'ladi
     (kafe yopiq, eng kam summa, taom tugagan, manzil hududdan tashqarida).
     Manzil hali tanlanmagan bo'lsa `latitude`/`longitude` yuborilmaydi.
+
+    Chegirma: `promo_code` yuborilsa o'sha tekshiriladi (ishlamasa sababi `promo_error`da,
+    buyurtma berishga xalaqit qilmaydi: ilova kodni olib tashlashni taklif qiladi).
+    `apply_auto_promo: true` bo'lsa, birinchi buyurtma chegirmasi o'zi qo'llanadi.
+    Token yuborilsa mijozning oldingi buyurtmalari hisobga olinadi.
     """
     result = await order_service.compute_quote(
         session,
@@ -68,6 +77,9 @@ async def quote(data: QuoteIn, session: SessionDep, cfg: CfgDep) -> QuoteOut:
         data.latitude,
         data.longitude,
         cfg,
+        promo_code=data.promo_code,
+        apply_auto_promo=data.apply_auto_promo,
+        phone=customer.phone if customer else None,
     )
     await session.commit()
     return QuoteOut(
@@ -83,6 +95,9 @@ async def quote(data: QuoteIn, session: SessionDep, cfg: CfgDep) -> QuoteOut:
         ],
         items_total=result.items_total,
         delivery_fee=result.delivery_fee,
+        discount=result.discount,
+        promo_title=result.promo.title,
+        promo_error=result.promo.error,
         total=result.total,
         distance_km=result.distance_km,
         can_order=result.can_order,

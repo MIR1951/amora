@@ -31,7 +31,7 @@ from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import Category, Order, Product, ShopSettings
+from app.models import Category, Order, Product, PromoCode, ShopSettings
 
 log = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ def _events_from_flush(session: Session) -> list[Event]:
     for obj in session.new:
         if isinstance(obj, Product | Category):
             found[Event(MENU)] = None
-        elif isinstance(obj, ShopSettings):
+        elif isinstance(obj, ShopSettings | PromoCode):
             found[Event(SHOP)] = None
         elif isinstance(obj, Order):
             found[_order_event(obj)] = None
@@ -264,7 +264,7 @@ def _events_from_flush(session: Session) -> list[Event]:
             continue
         if isinstance(obj, Product | Category):
             found[Event(MENU)] = None
-        elif isinstance(obj, ShopSettings):
+        elif isinstance(obj, ShopSettings | PromoCode):
             found[Event(SHOP)] = None
         elif isinstance(obj, Order):
             # Guruhdagi xabar raqami kabi ichki ustunlar o'zgarsa, mijozga xabar kerak emas
@@ -273,7 +273,7 @@ def _events_from_flush(session: Session) -> list[Event]:
     for obj in session.deleted:
         if isinstance(obj, Product | Category):
             found[Event(MENU)] = None
-        elif isinstance(obj, ShopSettings):
+        elif isinstance(obj, ShopSettings | PromoCode):
             found[Event(SHOP)] = None
     return list(found)
 

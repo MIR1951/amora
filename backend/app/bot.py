@@ -12,7 +12,14 @@ from aiogram.types import BotCommand
 
 from app.config import Settings, get_settings
 from app.db import make_engine, make_session_factory
-from app.telegram import admin_router, common_router, insights_router, orders_router, team_router
+from app.telegram import (
+    admin_router,
+    common_router,
+    insights_router,
+    orders_router,
+    promo_router,
+    team_router,
+)
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
 from app.telegram.watch import watch_forever
 
@@ -31,6 +38,7 @@ def build_dispatcher(cfg: Settings, session_factory: SessionFactory) -> Dispatch
     dispatcher.include_router(common_router.router)
     dispatcher.include_router(insights_router.router)
     dispatcher.include_router(team_router.router)
+    dispatcher.include_router(promo_router.router)
     # admin oxirida: unda tushunarsiz xabarlarni ushlaydigan handler bor
     dispatcher.include_router(admin_router.router)
     return dispatcher

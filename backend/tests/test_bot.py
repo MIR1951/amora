@@ -247,7 +247,8 @@ async def test_admin_main_menu(driver, seed):
         "📂 Kategoriyalar",
         "⚙️ Sozlamalar",
         "📊 Hisobot",
-        "👥 Adminlar va xodimlar",
+        "🎉 Aksiyalar",
+        "👥 Xodimlar",
         "⏸ Buyurtma qabul qilishni to'xtatish",
     ]
 

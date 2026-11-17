@@ -20,6 +20,7 @@ from app.models import (
     Product,
 )
 from app.schemas import OrderIn
+from app.services import promos
 from app.services.shop import distance_km, format_sum, get_shop, is_open_now
 
 CUSTOMER_ACTOR = "mijoz"
@@ -51,10 +52,15 @@ class Quote:
     delivery_fee: int = 0
     distance_km: float | None = None
     problems: list[Problem] = field(default_factory=list)
+    promo: promos.PromoResult = field(default_factory=promos.PromoResult)
+
+    @property
+    def discount(self) -> int:
+        return self.promo.discount
 
     @property
     def total(self) -> int:
-        return self.items_total + self.delivery_fee
+        return self.items_total - self.discount + self.delivery_fee
 
     @property
     def can_order(self) -> bool:
@@ -68,6 +74,9 @@ async def compute_quote(
     longitude: float | None,
     cfg: Settings,
     now: datetime | None = None,
+    promo_code: str | None = None,
+    apply_auto_promo: bool = False,
+    phone: str | None = None,
 ) -> Quote:
     """Savatni hisoblaydi. Narxlar har doim bazadan olinadi, ilova yuborgan narxga ishonilmaydi."""
     quote = Quote()
@@ -142,6 +151,10 @@ async def compute_quote(
     else:
         quote.delivery_fee = shop.delivery_fee
 
+    if quote.lines:
+        quote.promo = await promos.evaluate(
+            session, promo_code, apply_auto_promo, quote.items_total, phone, now
+        )
     return quote
 
 
@@ -232,11 +245,17 @@ async def create_order(
         data.latitude,
         data.longitude,
         cfg,
+        promo_code=data.promo_code,
+        apply_auto_promo=data.apply_auto_promo,
+        phone=phone,
     )
     if quote.problems:
         problem = quote.problems[0]
         extra = {"product_id": problem.product_id} if problem.product_id else {}
         raise ApiError(409, problem.code, problem.message, extra)
+
+    if quote.promo.error:
+        raise ApiError(409, "promo_invalid", quote.promo.error)
 
     if data.expected_total is not None and data.expected_total != quote.total:
         raise ApiError(
@@ -263,6 +282,11 @@ async def create_order(
         comment=data.comment,
         items_total=quote.items_total,
         delivery_fee=quote.delivery_fee,
+        discount=quote.discount,
+        promo_id=quote.promo.promo.id if quote.promo.promo else None,
+        promo_code=(
+            (quote.promo.promo.code or promos.AUTO_TITLE)[:30] if quote.promo.promo else None
+        ),
         total=quote.total,
         distance_km=quote.distance_km,
         items=[
@@ -276,6 +300,9 @@ async def create_order(
         ],
         history=[OrderStatusEvent(status=OrderStatus.NEW.value, actor=CUSTOMER_ACTOR)],
     )
+    if order.promo_id is not None and not await promos.take_use(session, order.promo_id):
+        await session.rollback()
+        raise ApiError(409, "promo_invalid", "Promokod tugab qolgan")
     session.add(order)
     try:
         await session.commit()
@@ -336,6 +363,7 @@ async def set_status_by_staff(
     order.status = new_status.value
     if new_status == OrderStatus.REJECTED:
         order.reject_reason = (reason or "").strip()[:255] or None
+        await promos.return_use(session, order)
     order.history.append(OrderStatusEvent(status=new_status.value, actor=actor[:100]))
     await session.commit()
     return order, True
@@ -365,6 +393,7 @@ async def cancel_by_customer(
         )
 
     order.status = OrderStatus.CANCELLED.value
+    await promos.return_use(session, order)
     order.history.append(
         OrderStatusEvent(status=OrderStatus.CANCELLED.value, actor=CUSTOMER_ACTOR)
     )

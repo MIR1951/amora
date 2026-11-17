@@ -43,3 +43,35 @@ def parse_hours(raw: str) -> tuple[time, time]:
     if open_hour > 23 or close_hour > 23 or open_minute > 59 or close_minute > 59:
         raise ValueError("Bunday vaqt yo'q. Namuna: 09:00-23:00")
     return time(open_hour, open_minute), time(close_hour, close_minute)
+
+
+def parse_discount(raw: str) -> tuple[str, int, int | None]:
+    """ "15%" -> foiz; "15% 30000" -> foiz, ko'pi bilan 30 000; "20000" -> so'mda.
+
+    (turi, qiymati, eng ko'p chegirma) qaytaradi. Noto'g'ri bo'lsa ValueError.
+    """
+    text = (raw or "").strip()
+    if "%" in text:
+        left, right = text.split("%", 1)
+        if not left.strip().isdigit():
+            raise ValueError("Foizni shunday yozing: 15% yoki 15% 30000")
+        percent = int(left.strip())
+        if not 1 <= percent <= 100:
+            raise ValueError("Foiz 1 dan 100 gacha bo'lishi kerak")
+        cap = parse_amount(right) if right.strip() else None
+        return "percent", percent, cap or None
+    try:
+        amount = parse_amount(text)
+    except ValueError:
+        raise ValueError("Chegirmani shunday yozing: 15% yoki 20000") from None
+    if amount <= 0:
+        raise ValueError("Chegirma 0 dan katta bo'lishi kerak")
+    return "amount", amount, None
+
+
+def parse_count(raw: str, maximum: int, example: str) -> int:
+    """Butun son: "0", "100". Noto'g'ri bo'lsa ValueError."""
+    cleaned = re.sub(r"[\s_]", "", raw or "")
+    if not cleaned.isdigit() or int(cleaned) > maximum:
+        raise ValueError(f"Faqat son yozing, masalan: {example}")
+    return int(cleaned)
