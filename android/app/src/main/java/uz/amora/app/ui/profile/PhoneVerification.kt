@@ -279,10 +279,13 @@ fun PhoneVerificationSection(
                         color = scheme.success,
                     )
                 }
+                Spacer(Modifier.width(10.dp))
+                // SoftButton o'zi butun kenglikni egallaydi: qatorda raqamga joy qolishi uchun eni belgilanadi
                 SoftButton(
                     text = "Almashtirish",
                     onClick = { vm.start(name) },
                     enabled = state.step == VerifyStep.Idle,
+                    modifier = Modifier.width(136.dp),
                 )
             }
         }
