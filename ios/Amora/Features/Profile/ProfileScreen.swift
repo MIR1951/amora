@@ -24,6 +24,7 @@ struct ProfileScreen: View {
     @Environment(\.amoraColors) private var colors
     @State private var toast = ToastCenter()
     @State private var name = ""
+    @State private var nameLoaded = false
     @FocusState private var nameFocused: Bool
 
     init(quickEdit: Bool = false) {
@@ -49,7 +50,7 @@ struct ProfileScreen: View {
     private var nameBinding: Binding<String> {
         Binding(
             get: { name },
-            set: { name = String($0.prefix(profileMaxNameLength)) }
+            set: { name = limitText($0, profileMaxNameLength) }
         )
     }
 
@@ -136,7 +137,15 @@ struct ProfileScreen: View {
         .background(colors.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         // Saqlangan profil o'zgarsa (masalan, boshqa telefonda ism o'zgargan bo'lsa), maydon ham yangilanadi
-        .onChange(of: container.session.profile?.name, initial: true) { _, newName in
+        // Ekran qayta ko'ringanda (masalan, xaritadan qaytganda) yozilayotgan ism o'chib ketmasin:
+        // maydon faqat birinchi marta va saqlangan ism haqiqatan o'zgarganda to'ldiriladi
+        .onAppear {
+            if !nameLoaded {
+                nameLoaded = true
+                name = container.session.profile?.name ?? ""
+            }
+        }
+        .onChange(of: container.session.profile?.name) { _, newName in
             name = newName ?? ""
         }
         .task {

@@ -231,6 +231,11 @@ private struct MenuScreenContent: View {
         .sheet(item: $selected) { item in
             productSheet(item, productsById: productsById)
         }
+        // Boshqa ekran ochilsa (masalan, bildirishnoma bosildi), taom oynasi yopiladi: aks holda u
+        // yangi ekranni to'sib qolardi
+        .onChange(of: router.path.isEmpty) { _, isEmpty in
+            if !isEmpty { selected = nil }
+        }
         // Ekran ko'rinib turganda menyu yangilanadi va faol buyurtmalar tekshirib turiladi
         .task(id: scenePhase == .active) {
             await poll()

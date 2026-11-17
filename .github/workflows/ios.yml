@@ -141,7 +141,11 @@ jobs:
           fi
           APP="$RUNNER_TEMP/dd-release/Build/Products/Release-iphonesimulator/Amora.app"
           test -d "$APP"
-          /usr/libexec/PlistBuddy -c "Print :AmoraApiBaseUrl" "$APP/Info.plist" || true
+          # Mijozlar oladigan yig'ish faqat haqiqiy serverga qarashi kerak
+          test "$(/usr/libexec/PlistBuddy -c "Print :AmoraApiBaseUrl" "$APP/Info.plist")" = "https://amora.mirjoy.uz"
+          # App Store maxfiylik fayli va shriftlar ilova ichida bo'lishi shart
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          ls "$APP"/*.ttf
           ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/out/amora-ios-simulator.zip"
           ls -lh "$RUNNER_TEMP/out"
 

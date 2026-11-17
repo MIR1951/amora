@@ -92,8 +92,10 @@ final class LiveUpdates {
         realtime.start()
     }
 
-    /// Ilova orqa fonga o'tdi. Faol buyurtma bo'lsa, ulanish tizim ruxsat bergancha (ko'pi bilan
-    /// 20 daqiqa) ushlab turiladi: shu orada holat o'zgarsa bildirishnoma chiqadi.
+    /// Ilova orqa fonga o'tdi. Faol buyurtma bo'lsa, ulanish tizim ruxsat bergancha ushlab turiladi
+    /// (iOS odatda ~30 soniya beradi; 20 daqiqa faqat yuqori chegara). Undan keyingi o'zgarishlar
+    /// ilova qayta ochilganda aytiladi (`ActiveOrders` oxirgi holatlarni saqlaydi). Ilova yopiq
+    /// paytdagi bildirishnoma uchun APNs push kerak (Apple Developer akkaunti bilan qo'shiladi).
     func onBackground() {
         foreground = false
         lingerTask?.cancel()

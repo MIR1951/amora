@@ -93,6 +93,7 @@ extension UINavigationController: UIGestureRecognizerDelegate {
 
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // Menyuda (ildiz ekranda) orqaga qaytadigan joy yo'q
-        viewControllers.count > 1
+        // O'tish animatsiyasi paytida boshlanmaydi: aks holda navigatsiya chalkashib qolishi mumkin
+        viewControllers.count > 1 && transitionCoordinator == nil
     }
 }

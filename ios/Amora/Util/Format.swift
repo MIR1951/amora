@@ -163,3 +163,20 @@ func distanceKm(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) 
         cos(lat1 * toRadians) * cos(lat2 * toRadians) * pow(sin(dLon / 2), 2)
     return 2 * earthRadiusKm * asin(sqrt(a))
 }
+
+
+/// Matnni server cheklovi bo'yicha qisqartiradi. Server (pydantic) Unicode belgilarni (code point)
+/// sanaydi, Swift esa ko'rinadigan belgilarni: bitta emoji bir nechta code point bo'lishi mumkin.
+/// Oxirida yarim qolgan emoji bo'lsa, u ham olib tashlanadi.
+func limitText(_ text: String, _ limit: Int) -> String {
+    if text.unicodeScalars.count <= limit { return text }
+    var result = ""
+    var used = 0
+    for character in text {
+        let size = character.unicodeScalars.count
+        if used + size > limit { break }
+        result.append(character)
+        used += size
+    }
+    return result
+}

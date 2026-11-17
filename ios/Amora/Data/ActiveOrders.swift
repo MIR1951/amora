@@ -32,20 +32,46 @@ final class ActiveOrders {
     func refresh() async {
         if session.token == nil {
             orders = []
+            saveKnown([])
             return
         }
-        let before = orders
+        // iOS ilovani fonda tez to'xtatadi va ko'pincha butunlay yopadi. Shuning uchun oxirgi ko'rilgan
+        // holatlar telefonda saqlanadi: ilova qayta ochilganda shu orada o'zgargan buyurtma ham aytiladi.
+        let known = orders.isEmpty ? loadKnown() : Dictionary(
+            orders.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }
+        )
         do {
             let latest = try await api.orders(limit: 5).orders
             orders = latest.filter { $0.isActive }
-            for order in changedOrders(before: before, latest: latest) {
+            saveKnown(orders)
+            for order in latest where known[order.id].map({ $0 != order.status }) ?? false {
                 onStatusChange?(order)
             }
         } catch {
             if let apiError = error as? ApiError, apiError.isUnauthorized {
                 orders = []
+                saveKnown([])
             }
         }
+    }
+
+    private static let knownKey = "amora.activeOrderStatuses"
+
+    private func loadKnown() -> [Int: String] {
+        guard let saved = UserDefaults.standard.dictionary(forKey: ActiveOrders.knownKey) as? [String: String] else {
+            return [:]
+        }
+        var result: [Int: String] = [:]
+        for (key, status) in saved {
+            if let id = Int(key) { result[id] = status }
+        }
+        return result
+    }
+
+    private func saveKnown(_ active: [Order]) {
+        var saved: [String: String] = [:]
+        for order in active { saved[String(order.id)] = order.status }
+        UserDefaults.standard.set(saved, forKey: ActiveOrders.knownKey)
     }
 }
 

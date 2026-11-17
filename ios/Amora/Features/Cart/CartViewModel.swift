@@ -128,7 +128,7 @@ final class CartViewModel {
     }
 
     func setComment(_ value: String) {
-        let next = String(value.prefix(CartViewModel.maxCommentLength))
+        let next = limitText(value, CartViewModel.maxCommentLength)
         if next != comment {
             comment = next
         }

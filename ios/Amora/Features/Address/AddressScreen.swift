@@ -290,7 +290,7 @@ final class AddressScreenModel {
     }
 
     func setNote(_ text: String) {
-        note = String(text.prefix(AddressConst.maxNoteLength))
+        note = limitText(text, AddressConst.maxNoteLength)
     }
 
     /// Tasdiqlash: xarita yetarlicha yaqin bo'lsa manzil saqlanadi va true qaytadi.
