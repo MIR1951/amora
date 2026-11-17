@@ -804,51 +804,7 @@ fun orderStep(status: String): Int = when (status) {
     else -> 0
 }
 
-/**
- * To'rt bo'lakli chiziq: o'tilgan bosqichlar to'la, hozirgi bosqich yarim to'lgan.
- * Holat o'zgarganda bo'laklar ohista to'ladi.
- */
-@Composable
-fun OrderProgressBar(
-    status: String,
-    modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
-    track: Color = MaterialTheme.colorScheme.outlineVariant,
-) {
-    val step = orderStep(status)
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        repeat(4) { index ->
-            val target = when {
-                status == OrderStatus.DELIVERED -> 1f
-                index < step - 1 -> 1f
-                index == step - 1 -> 0.55f
-                else -> 0f
-            }
-            val fraction by animateFloatAsState(
-                targetValue = target,
-                animationSpec = tween(600),
-                label = "order-progress",
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(track),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction)
-                        .fillMaxHeight()
-                        .background(color),
-                )
-            }
-        }
-    }
-}
+// OrderProgressBar: OrderProgress.kt
 
 // ---------- Yuqori va pastki satrlar ----------
 
