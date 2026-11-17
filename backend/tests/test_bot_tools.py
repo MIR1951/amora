@@ -235,7 +235,7 @@ async def test_unaccepted_order_gets_one_reminder(api, seed, bot, tg, session_fa
     assert await check_delays(session_factory, bot) == 1
     alert = tg.of_type(SendMessage)[-1]
     assert alert.chat_id == GROUP_ID and alert.reply_to_message_id == 1001
-    assert f"№{order['id']}</b> buyurtma 5 daqiqadan beri qabul qilinmadi" in alert.text
+    assert f"№{order['id']}</b> buyurtma 6 daqiqadan beri qabul qilinmadi" in alert.text
 
     assert await check_delays(session_factory, bot) == 0  # bir holat uchun bir marta
 
@@ -250,7 +250,7 @@ async def test_long_delivery_gets_reminder(api, seed, bot, tg, driver, session_f
     await age_order(session_factory, order["id"], 20)
     assert await check_delays(session_factory, bot) == 1
     alert = tg.of_type(SendMessage)[-1]
-    assert "45 daqiqadan beri yo'lda" in alert.text and "+998901234567" in alert.text
+    assert "50 daqiqadan beri yo'lda" in alert.text and "+998901234567" in alert.text
 
     done = OrderCb(id=order["id"], action="done").pack()
     await driver.press_data(done, STAFF, GROUP_ID, 1001, "supergroup")
@@ -598,3 +598,62 @@ async def test_daily_report_claim_is_released_on_error(
         await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 1))
     monkeypatch.setattr(watch, "build_report", real_build)
     assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 2)) is True
+
+
+async def test_unreachable_chat_does_not_block_other_alerts(api, seed, bot, tg, session_factory):
+    from aiogram.exceptions import TelegramForbiddenError
+
+    first, _ = await place_order(api, seed)
+    second, _ = await place_order(api, seed, auth=await register(api, phone="90 765 43 21"))
+    # Birinchi buyurtma eski guruhga ketgan, bot u yerdan chiqarilgan
+    old_group = -100999
+    async with session_factory() as session:
+        await session.execute(update(Order).where(Order.id == first["id"]).values(tg_chat_id=old_group))
+        await session.commit()
+    tg.failing_chats[old_group] = TelegramForbiddenError(method=None, message="kicked")
+    await age_order(session_factory, first["id"], 10)
+    await age_order(session_factory, second["id"], 10)
+
+    assert await check_delays(session_factory, bot) == 1
+    assert f"№{second['id']}</b>" in tg.of_type(SendMessage)[-1].text
+    assert await check_delays(session_factory, bot) == 0  # buzuq chatga qayta-qayta urinmaydi
+
+
+async def test_alert_is_kept_when_bot_stops_during_send(api, seed, bot, tg, session_factory):
+    import asyncio
+
+    order, _ = await place_order(api, seed)
+    await age_order(session_factory, order["id"], 6)
+    tg.fail_with = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await check_delays(session_factory, bot)
+    tg.fail_with = None
+    assert await check_delays(session_factory, bot) == 1
+
+
+async def test_daily_report_is_not_repeated_after_partial_send(
+    bot, tg, bot_cfg, session_factory, seed
+):
+    import asyncio
+
+    await set_shop(session_factory, open_time=time(9), close_time=time(23), daily_report_to="admins")
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
+        await session.commit()
+    real_send = bot.send_message
+    calls = 0
+
+    async def send_then_stop(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise asyncio.CancelledError()
+        return await real_send(*args, **kwargs)
+
+    bot.send_message = send_then_stop
+    with pytest.raises(asyncio.CancelledError):
+        await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 1))
+    bot.send_message = real_send
+    # Birinchi odam olgan: ikkinchi marta hammaga yuborilmaydi
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 2)) is False
+    assert len(tg.of_type(SendMessage)) == 1

@@ -39,7 +39,9 @@ class FakeSession(BaseSession):
     def __init__(self):
         super().__init__()
         self.requests: list[TelegramMethod] = []
-        self.fail_with: Exception | None = None
+        self.fail_with: BaseException | None = None
+        # Faqat shu chatlarga yuborishda xato (bot guruhdan chiqarilgan va h.k.)
+        self.failing_chats: dict[int, Exception] = {}
         self._next_message_id = 1000
 
     async def close(self) -> None:
@@ -48,6 +50,9 @@ class FakeSession(BaseSession):
     async def make_request(self, bot, method, timeout=None):
         if self.fail_with is not None:
             raise self.fail_with
+        chat_error = self.failing_chats.get(getattr(method, "chat_id", None))
+        if chat_error is not None:
+            raise chat_error
         self.requests.append(method)
         if isinstance(method, SendMessage):
             self._next_message_id += 1
