@@ -89,7 +89,10 @@ def main_menu_keyboard(shop: ShopSettings, role: str = "owner") -> InlineKeyboar
         rows = [
             [_btn("🍽 Menyu", AdminCb(action="menu")), _btn("📂 Kategoriyalar", AdminCb(action="cats"))],
             [_btn("⚙️ Sozlamalar", AdminCb(action="settings")), report],
-            [_btn("👥 Adminlar va xodimlar", AdminCb(action="team"))],
+            [
+                _btn("🎉 Aksiyalar", AdminCb(action="promo")),
+                _btn("👥 Xodimlar", AdminCb(action="team")),
+            ],
             [toggle],
         ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -279,5 +282,76 @@ def confirm_remove_keyboard(member_id: int) -> InlineKeyboardMarkup:
                 _btn("🗑 Ha, olib tashlansin", AdminCb(action="team_del_yes", id=member_id)),
                 _btn("⬅️ Yo'q", AdminCb(action="team")),
             ]
+        ]
+    )
+
+
+# ---------- Aksiyalar ----------
+
+
+def promo_menu_keyboard(codes: list) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(_btn("🖼 Bosh sahifadagi banner", AdminCb(action="ban")))
+    builder.row(_btn("🆕 Birinchi buyurtma chegirmasi", AdminCb(action="auto")))
+    for promo in codes:
+        mark = "🟢" if promo.is_active else "⚪️"
+        builder.row(_btn(f"{mark} {promo.code}", AdminCb(action="pc", id=promo.id)))
+    builder.row(_btn("➕ Promokod qo'shish", AdminCb(action="pc_add")))
+    builder.row(BACK_TO_MAIN)
+    return builder.as_markup()
+
+
+BACK_TO_PROMO = _btn("⬅️ Aksiyalar", AdminCb(action="promo"))
+
+
+def banner_keyboard(has_custom: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [_btn("✏️ Sarlavha", AdminCb(action="ban_edit", value="title"))],
+        [_btn("✏️ Pastki matn", AdminCb(action="ban_edit", value="text"))],
+    ]
+    if has_custom:
+        rows.append([_btn("↩️ Standart matnga qaytarish", AdminCb(action="ban_reset"))])
+    rows.append([BACK_TO_PROMO])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def auto_promo_keyboard(active: bool) -> InlineKeyboardMarkup:
+    rows = [[_btn("✏️ Chegirmani belgilash", AdminCb(action="auto_edit"))]]
+    if active:
+        rows.append([_btn("⏸ O'chirish", AdminCb(action="auto_off"))])
+    rows.append([BACK_TO_PROMO])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def promo_card_keyboard(promo) -> InlineKeyboardMarkup:
+    toggle = (
+        _btn("⏸ To'xtatish", AdminCb(action="pc_off", id=promo.id))
+        if promo.is_active
+        else _btn("▶️ Yoqish", AdminCb(action="pc_on", id=promo.id))
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [toggle],
+            [_btn("🗑 O'chirib tashlash", AdminCb(action="pc_del", id=promo.id))],
+            [BACK_TO_PROMO],
+        ]
+    )
+
+
+def confirm_promo_delete_keyboard(promo_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_btn("🗑 Ha, o'chirilsin", AdminCb(action="pc_del_yes", id=promo_id))],
+            [_btn("⬅️ Yo'q", AdminCb(action="pc", id=promo_id))],
+        ]
+    )
+
+
+def promo_audience_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_btn("👥 Hamma mijozlar", AdminCb(action="pc_new", value="0"))],
+            [_btn("🆕 Faqat birinchi buyurtma", AdminCb(action="pc_new", value="1"))],
+            [_btn("❌ Bekor qilish", AdminCb(action="promo"))],
         ]
     )

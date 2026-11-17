@@ -45,6 +45,9 @@ data class Shop(
     @SerialName("max_delivery_km") val maxDeliveryKm: Double? = null,
     @SerialName("cafe_latitude") val cafeLatitude: Double? = null,
     @SerialName("cafe_longitude") val cafeLongitude: Double? = null,
+    // Bosh sahifadagi banner: bo'sh bo'lsa ilova yetkazish shartini o'zi yozadi
+    @SerialName("banner_title") val bannerTitle: String? = null,
+    @SerialName("banner_text") val bannerText: String? = null,
 )
 
 // ---------- Mijoz ----------
@@ -88,6 +91,11 @@ data class QuoteIn(
     val items: List<CartItemIn>,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    @SerialName("promo_code") val promoCode: String? = null,
+    // Birinchi buyurtma chegirmasi kod kiritmasdan qo'llanadi
+    @SerialName("apply_auto_promo") val applyAutoPromo: Boolean = true,
+    // Hali ro'yxatdan o'tilmagan bo'lsa: birinchi buyurtma chegirmasi shu raqam bo'yicha tekshiriladi
+    val phone: String? = null,
 )
 
 @Serializable
@@ -115,6 +123,9 @@ data class Quote(
     @SerialName("distance_km") val distanceKm: Double? = null,
     @SerialName("can_order") val canOrder: Boolean = false,
     val problems: List<Problem> = emptyList(),
+    val discount: Int = 0,
+    @SerialName("promo_title") val promoTitle: String? = null,
+    @SerialName("promo_error") val promoError: String? = null,
 )
 
 @Serializable
@@ -130,6 +141,8 @@ data class OrderIn(
     @SerialName("client_order_id") val clientOrderId: String? = null,
     // Ilova ko'rsatgan summa: narx o'zgargan bo'lsa server buyurtmani qabul qilmaydi
     @SerialName("expected_total") val expectedTotal: Int? = null,
+    @SerialName("promo_code") val promoCode: String? = null,
+    @SerialName("apply_auto_promo") val applyAutoPromo: Boolean = true,
 )
 
 @Serializable
@@ -158,6 +171,8 @@ data class Order(
     val items: List<OrderItem> = emptyList(),
     @SerialName("items_total") val itemsTotal: Int = 0,
     @SerialName("delivery_fee") val deliveryFee: Int = 0,
+    val discount: Int = 0,
+    @SerialName("promo_code") val promoCode: String? = null,
     val total: Int = 0,
     @SerialName("customer_name") val customerName: String = "",
     val phone: String = "",

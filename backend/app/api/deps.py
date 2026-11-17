@@ -33,18 +33,25 @@ CfgDep = Annotated[Settings, Depends(get_cfg)]
 NotifierDep = Annotated[Notifier, Depends(get_notifier)]
 
 
-async def get_current_customer(
+async def get_optional_customer(
     session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-) -> Customer:
+) -> Customer | None:
     if credentials is None or not credentials.credentials:
-        raise ApiError(401, "unauthorized", "Avval ro'yxatdan o'ting")
-    customer = await session.scalar(
+        return None
+    return await session.scalar(
         select(Customer).where(Customer.token_hash == hash_token(credentials.credentials))
     )
+
+
+async def get_current_customer(
+    customer: Annotated[Customer | None, Depends(get_optional_customer)],
+) -> Customer:
     if customer is None:
         raise ApiError(401, "unauthorized", "Avval ro'yxatdan o'ting")
     return customer
 
 
 CustomerDep = Annotated[Customer, Depends(get_current_customer)]
+# Ro'yxatdan o'tmagan mijoz ham ishlata oladigan so'rovlar uchun (savatni hisoblash)
+OptionalCustomerDep = Annotated[Customer | None, Depends(get_optional_customer)]

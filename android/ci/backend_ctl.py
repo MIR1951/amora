@@ -22,7 +22,7 @@ from sqlalchemy import func, select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db import make_engine, make_session_factory  # noqa: E402
-from app.models import Category, Order, OrderStatus, Product  # noqa: E402
+from app.models import Category, Order, OrderStatus, Product, PromoCode  # noqa: E402
 from app.services.orders import set_status_by_staff  # noqa: E402
 from app.services.shop import get_shop  # noqa: E402
 
@@ -109,6 +109,12 @@ async def prepare() -> None:
         shop.delivery_fee = 10_000
         shop.free_delivery_from = 100_000
         shop.min_order_amount = 20_000
+        # Botdan yoziladigan aksiya matni va chegirmalar
+        shop.banner_title = "Birinchi buyurtmaga\n−10% chegirma"
+        shop.banner_text = "Keyingisiga promokod: AMORA10"
+        if not await session.scalar(select(func.count()).select_from(PromoCode)):
+            session.add(PromoCode(is_auto=True, kind="percent", value=10, first_order_only=True))
+            session.add(PromoCode(code="AMORA10", kind="amount", value=5_000))
         await session.commit()
     await engine.dispose()
     print("Sinov serveri tayyor")

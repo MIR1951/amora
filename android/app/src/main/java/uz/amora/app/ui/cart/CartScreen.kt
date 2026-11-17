@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -133,7 +135,11 @@ fun CartScreen(
         sum + (productsById[entry.key]?.price ?: 0) * entry.value
     }
     val itemsTotal = quote?.itemsTotal ?: localItemsTotal
-    val canOrder = quote != null && quote.canOrder && !state.quoteLoading && state.quoteError == null
+    // Summa hozir qo'llangan promokod bilan hisoblanganmi (yangi kod tekshirilayotgan bo'lishi mumkin)
+    val promoFresh = state.quotePromo == state.appliedPromo
+    val codeWorks = promoFresh && state.appliedPromo != null && quote?.promoError == null
+    val canOrder = quote != null && quote.canOrder && !state.quoteLoading && state.quoteError == null &&
+        promoFresh
     // Summa birinchi marta serverdan kutilayotganda raqamlar o'rnida skelet ko'rinadi
     val quotePending = quote == null && state.quoteError == null
 
@@ -309,6 +315,18 @@ fun CartScreen(
                     }
                 }
 
+                item(key = "promo") {
+                    PromoCard(
+                        input = state.promoInput,
+                        applied = state.appliedPromo,
+                        title = quote?.promoTitle?.takeIf { codeWorks },
+                        error = quote?.promoError?.takeIf { promoFresh && state.appliedPromo != null },
+                        onInput = vm::setPromoInput,
+                        onApply = vm::applyPromo,
+                        onRemove = vm::removePromo,
+                    )
+                }
+
                 if (generalProblems.isNotEmpty()) {
                     item(key = "problems") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -343,6 +361,23 @@ fun CartScreen(
                             },
                             loading = quotePending,
                         )
+                        if (quote != null && quote.discount > 0) {
+                            SummaryRow(
+                                label = if (codeWorks) "Chegirma (${state.appliedPromo})" else "Chegirma",
+                                value = "−${formatSum(quote.discount)}",
+                                valueColor = scheme.success,
+                            )
+                            // Kod kiritmasdan berilgan chegirma: nimaga berilganini aytamiz
+                            val autoTitle = quote.promoTitle
+                            if (!codeWorks && autoTitle != null) {
+                                Text(
+                                    text = "🎉 $autoTitle",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = scheme.success,
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(10.dp))
                         DashedDivider()
                         Spacer(Modifier.height(12.dp))
@@ -404,6 +439,75 @@ fun CartScreen(
             },
             onDismiss = { confirming = false },
         )
+    }
+}
+
+/** Promokod maydoni: "Qo'llash" bosilgach server tekshiradi, natija pastda yoziladi. */
+@Composable
+private fun PromoCard(
+    input: String,
+    applied: String?,
+    title: String?,
+    error: String?,
+    onInput: (String) -> Unit,
+    onApply: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val editing = applied == null || input != applied
+    SectionCard(padding = 0.dp) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconTile(
+                icon = R.drawable.ic_tag,
+                container = scheme.successContainer,
+                tint = scheme.success,
+            )
+            TextField(
+                value = input,
+                onValueChange = onInput,
+                placeholder = { Text("Promokod") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                colors = fieldColors(Color.Transparent),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Characters,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { if (editing) onApply() }),
+            )
+            if (editing) {
+                TextButton(onClick = onApply, enabled = input.isNotBlank()) {
+                    Text("Qo'llash", style = MaterialTheme.typography.labelLarge)
+                }
+            } else {
+                TextButton(onClick = onRemove) {
+                    Text(
+                        "Olib tashlash",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        val message = when {
+            editing -> null
+            error != null -> error
+            title != null -> "✓ $title"
+            else -> null
+        }
+        if (message != null) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error != null) scheme.error else scheme.success,
+                modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
     }
 }
 

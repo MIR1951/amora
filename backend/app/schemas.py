@@ -50,6 +50,8 @@ class ShopOut(BaseModel):
     max_delivery_km: float | None
     cafe_latitude: float | None
     cafe_longitude: float | None
+    banner_title: str | None = None
+    banner_text: str | None = None
 
 
 # ---------- Mijoz ----------
@@ -117,6 +119,23 @@ class QuoteIn(BaseModel):
     items: list[CartItemIn] = Field(min_length=1, max_length=30)
     latitude: Latitude | None = None
     longitude: Longitude | None = None
+    promo_code: str | None = Field(default=None, max_length=30)
+    # Yangi ilova shuni yuboradi: birinchi buyurtma chegirmasi kod kiritmasdan qo'llanadi.
+    # Eski ilovalarda summa kutilmaganda o'zgarib qolmasligi uchun standart holatda o'chiq
+    apply_auto_promo: bool = False
+    # Ilova bilgan telefon (mijoz hali ro'yxatdan o'tmagan bo'lsa): birinchi buyurtma
+    # chegirmasi shu raqam bo'yicha tekshiriladi. Token yuborilsa, tokendagi raqam ustun
+    phone: str | None = Field(default=None, max_length=30)
+
+    @field_validator("phone")
+    @classmethod
+    def _normalize_quote_phone(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return normalize_phone(value)
+        except ValueError:
+            return None  # noto'g'ri raqam savat hisobiga xalaqit bermaydi
 
 
 class ProblemOut(BaseModel):
@@ -141,6 +160,9 @@ class QuoteOut(BaseModel):
     distance_km: float | None
     can_order: bool
     problems: list[ProblemOut]
+    discount: int = 0
+    promo_title: str | None = None  # "AMORA10: −10%" yoki "Birinchi buyurtma: −15%"
+    promo_error: str | None = None  # kiritilgan kod ishlamadi: sababi
 
 
 class OrderIn(BaseModel):
@@ -156,6 +178,8 @@ class OrderIn(BaseModel):
     client_order_id: UUID | None = None
     # Ilova ko'rsatgan jami summa: narx o'zgargan bo'lsa server buyurtmani qabul qilmaydi
     expected_total: int | None = Field(default=None, ge=0)
+    promo_code: str | None = Field(default=None, max_length=30)
+    apply_auto_promo: bool = False
 
     _clean_note = field_validator("address_note", "comment")(_clean)
 
@@ -195,6 +219,8 @@ class OrderOut(BaseModel):
     items: list[OrderItemOut]
     items_total: int
     delivery_fee: int
+    discount: int = 0
+    promo_code: str | None = None
     total: int
     customer_name: str
     phone: str

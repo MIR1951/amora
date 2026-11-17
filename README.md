@@ -43,6 +43,7 @@ Telegram vaqtincha ishlamay qolsa ham buyurtma yo'qolmaydi: bot har 20 soniyada 
 - **Buyurtma qabul qilishni to'xtatish/yoqish:** kafe band bo'lganda bitta tugma.
 - `/mijoz 901234567` (yoki `/mijoz 45`, buyurtma raqami bilan): mijoz kartasi. Buyurtmalari, jami xaridi, ko'p oladigan taomlari, soxta buyurtmalari va bloklash tugmasi.
 - `/blok 901234567` va `/ochish 901234567`: soxta buyurtma bergan raqamni bloklash.
+- **Aksiyalar** (egasi va adminlar): ilovadagi bosh sahifa bannerining sarlavhasi va matni; birinchi buyurtma chegirmasi (yangi mijozga kod kiritmasdan, telefon raqami bo'yicha bir marta); promokodlar (foiz yoki so'm, eng ko'p chegirma, eng kam buyurtma, nechta buyurtmaga, necha kun, faqat yangi mijozlar uchunmi). Har bir mijoz bitta promokodni bir marta ishlatadi; buyurtma bekor qilinsa yoki rad etilsa, promokod qaytadi. Chegirma taomlar summasidan olinadi, yetkazish narxiga tegmaydi. Guruhdagi xabarda va hisobotda chegirma alohida ko'rinadi.
 - **Adminlar va xodimlar:** bot bir martalik taklif havolasini beradi (24 soat amal qiladi), yangi odam uni bosib qo'shiladi. Egasi (`AMORA_ADMIN_IDS`) admin va xodim qo'sha oladi, admin faqat xodim. Xodim faqat taomni bor/tugadi qiladi, qabulni to'xtatadi, hisobot va mijoz kartasini ko'radi.
 
 ### Botni sozlash
@@ -64,7 +65,7 @@ Barcha manzillar `/api/v1` bilan boshlanadi. To'liq interaktiv hujjat server ish
 | `GET /shop` | Ish vaqti, yetkazish narxi, kafe hozir ochiqmi |
 | `POST /auth/register` | Ism va telefon bilan ro'yxatdan o'tish, token qaytaradi |
 | `GET /me`, `PATCH /me` | Profil |
-| `POST /orders/quote` | Savatni hisoblash: summa, yetkazish narxi, buyurtma berish mumkinmi |
+| `POST /orders/quote` | Savatni hisoblash: summa, yetkazish narxi, chegirma (`promo_code`, `apply_auto_promo`), buyurtma berish mumkinmi |
 | `POST /orders` | Buyurtma berish |
 | `GET /orders` | Buyurtmalarim |
 | `GET /orders/{id}` | Buyurtma holati |

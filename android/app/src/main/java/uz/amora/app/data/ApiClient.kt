@@ -74,11 +74,23 @@ class ApiClient(
 
     // ---------- Buyurtma ----------
 
-    suspend fun quote(items: List<CartItemIn>, latitude: Double?, longitude: Double?): Quote = call(
+    // Token bo'lsa yuboriladi: server mijozning oldingi buyurtmalarini ko'rib, birinchi buyurtma
+    // chegirmasini va promokodni to'g'ri hisoblaydi. Tokensiz ham ishlaydi.
+    suspend fun quote(
+        items: List<CartItemIn>,
+        latitude: Double?,
+        longitude: Double?,
+        promoCode: String? = null,
+        phone: String? = null,
+    ): Quote = call(
         "POST",
         "/orders/quote",
         Quote.serializer(),
-        body = json.encodeToString(QuoteIn.serializer(), QuoteIn(items, latitude, longitude)),
+        body = json.encodeToString(
+            QuoteIn.serializer(),
+            QuoteIn(items, latitude, longitude, promoCode = promoCode, phone = phone),
+        ),
+        auth = true,
     )
 
     suspend fun createOrder(order: OrderIn): Order = call(

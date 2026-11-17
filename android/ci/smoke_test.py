@@ -197,6 +197,42 @@ def tap_scrolling(needle, attempts=6):
     raise RuntimeError(f"Ekranda topilmadi (surib ko'rilganda ham): {needle!r}")
 
 
+def find_scrolling(needle, attempts=6):
+    """Ekranni pastga surib, shu yozuv ko'ringuncha izlaydi."""
+    for _ in range(attempts):
+        node = find(needle)
+        if node:
+            return node
+        adb("shell", "input", "swipe", "540", "1500", "540", "900", "400")
+        time.sleep(1.5)
+    raise RuntimeError(f"Ekranda topilmadi (surib ko'rilganda ham): {needle!r}")
+
+
+def enter_promo(code):
+    """Savatdagi promokod maydoniga kod yozib, "Qo'llash"ni bosadi."""
+    for _ in range(6):
+        if find("Qo'llash"):
+            break
+        remove = find("Olib tashlash")
+        if remove:
+            tap_node(remove)  # oldingi kod: olib tashlab, yangisini yozamiz
+            continue
+        adb("shell", "input", "swipe", "540", "1500", "540", "900", "400")
+        time.sleep(1.5)
+    wait_for("Qo'llash", timeout=10)
+    fields = [node for node in nodes(dump()) if node["class"].endswith("EditText")]
+    if not fields:
+        raise RuntimeError("Promokod maydoni topilmadi")
+    field = fields[-1]  # promokod izoh maydonidan pastda turadi
+    tap_node(field)
+    adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+    adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * 25))
+    type_text(code)
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")  # klaviaturani yopamiz
+    time.sleep(1)
+    tap("Qo'llash")
+
+
 def backend(*args):
     """Sinov serverida kafe xodimi yoki admin o'rnida biror ish qiladi (backend_ctl.py)."""
     command = [sys.executable, str(Path(__file__).with_name("backend_ctl.py")), *args]
@@ -385,6 +421,12 @@ def scenario_full():
 
     fill_cart()
 
+    # Birinchi buyurtma chegirmasi kod kiritmasdan qo'llanadi
+    find_scrolling("Birinchi buyurtma: −10%")
+    find("Chegirma") or find_scrolling("Chegirma")
+    shot("08a-cart-first-order-discount")
+    print("Birinchi buyurtma chegirmasi:", visible_texts(), flush=True)
+
     # 1-buyurtma: kafe qabul qiladi, kuryer yo'lga chiqadi, yetkazadi
     place_order()
     shot("09-order-new")
@@ -430,7 +472,19 @@ def scenario_full():
     tap_scrolling("Yana shunday buyurtma berish")
     wait_for("Buyurtma berish ·", timeout=60)  # savat ochildi
     shot("15-reorder-cart")
+    # Ikkinchi buyurtmada avtomatik chegirma yo'q, promokod kiritiladi
+    if find("Birinchi buyurtma: −"):
+        raise RuntimeError("Birinchi buyurtma chegirmasi ikkinchi buyurtmada ham chiqdi")
+    enter_promo("XATO")
+    wait_for("Bunday promokod yo'q", timeout=20)
+    shot("15a-promo-wrong")
+    enter_promo("AMORA10")
+    wait_for("AMORA10:", timeout=20)
+    time.sleep(1)
+    shot("15b-promo-applied")
+    print("Promokod:", visible_texts(), flush=True)
     place_order()
+    shot("15c-order-with-promo")
     tap("Buyurtmani bekor qilish")
     wait_for("Buyurtmani bekor qilasizmi?")
     shot("16-cancel-dialog")
