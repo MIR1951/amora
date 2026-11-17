@@ -171,6 +171,12 @@ async def msg_banner(message: Message, state: FSMContext, session_factory: Sessi
         if value.count("\n") > 1:
             await message.answer("Sarlavha ko'pi bilan 2 qator bo'lsin.")
             return
+        if "\n" in value and max(len(line) for line in value.splitlines()) > texts.BANNER_TITLE_LINE_MAX:
+            await message.answer(
+                f"Har bir qator ko'pi bilan {texts.BANNER_TITLE_LINE_MAX} ta harf bo'lsin, "
+                "aks holda ilovada qirqilib qoladi."
+            )
+            return
     else:
         value = clean_text(message)
         limit = texts.BANNER_TEXT_MAX

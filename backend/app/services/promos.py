@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import utcnow
@@ -39,12 +39,14 @@ class PromoResult:
     error: str | None = None  # kiritilgan kod nega ishlamadi
 
 
-async def _real_orders(session: AsyncSession, phone: str, promo_id: int | None = None) -> int:
+async def _real_orders(session: AsyncSession, phone: str, promo: PromoCode | None = None) -> int:
     query = select(func.count()).select_from(Order).where(
         Order.phone == phone, Order.status.not_in(_VOID)
     )
-    if promo_id is not None:
-        query = query.where(Order.promo_id == promo_id)
+    if promo is not None:
+        # Kod nomi bo'yicha ham: o'chirib, xuddi shu nom bilan qayta qo'shilgan kod
+        # mijozga ikkinchi marta berilmasin
+        query = query.where(or_(Order.promo_id == promo.id, Order.promo_code == promo.code))
     return await session.scalar(query)
 
 
@@ -68,33 +70,51 @@ async def evaluate(
 ) -> PromoResult:
     """Savatga qaysi chegirma tushishini aniqlaydi.
 
-    Kod kiritilgan bo'lsa faqat o'sha tekshiriladi. Kiritilmagan bo'lsa (va ilova buni
-    tushunsa) birinchi buyurtma chegirmasi o'zi qo'llanadi. Telefon noma'lum bo'lsa
-    (mijoz hali ro'yxatdan o'tmagan), u yangi mijoz deb hisoblanadi: buyurtma berilganda
-    raqam bo'yicha yana tekshiriladi.
+    Kod kiritilgan bo'lsa o'sha tekshiriladi. Kiritilmagan bo'lsa (va ilova buni tushunsa)
+    birinchi buyurtma chegirmasi o'zi qo'llanadi. Kiritilgan kod ishlamasa ham birinchi
+    buyurtma chegirmasi hisoblanadi (xato bilan birga): ilova ishlamagan kodni buyurtmaga
+    qo'shmaydi, shunda savatdagi summa buyurtmadagi bilan bir xil bo'ladi.
+    Telefon noma'lum bo'lsa, mijoz yangi deb hisoblanadi: buyurtmada raqam bo'yicha yana
+    tekshiriladi.
     """
     now = now or utcnow()
     code = normalize_code(code)
     if code:
-        promo = await session.scalar(
-            select(PromoCode).where(PromoCode.code == code, PromoCode.is_auto.is_(False))
-        )
-        if promo is None:
-            return PromoResult(error="Bunday promokod yo'q")
-        problem = _usable(promo, now)
-        if problem is None and items_total < promo.min_order:
-            problem = f"Promokod {format_sum(promo.min_order)}dan boshlab amal qiladi"
-        if problem is None and phone:
-            if promo.first_order_only and await _real_orders(session, phone):
-                problem = "Bu promokod faqat birinchi buyurtma uchun"
-            elif await _real_orders(session, phone, promo.id):
-                problem = "Siz bu promokoddan foydalangansiz"
-        if problem is not None:
-            return PromoResult(error=problem)
-        return PromoResult(promo, promo.discount_for(items_total), f"{code}: {describe(promo)}")
-
+        result = await _evaluate_code(session, code, items_total, phone, now)
+        if result.error is not None and apply_auto:
+            fallback = await _evaluate_auto(session, items_total, phone, now)
+            fallback.error = result.error
+            return fallback
+        return result
     if not apply_auto:
         return PromoResult()
+    return await _evaluate_auto(session, items_total, phone, now)
+
+
+async def _evaluate_code(
+    session: AsyncSession, code: str, items_total: int, phone: str | None, now: datetime
+) -> PromoResult:
+    promo = await session.scalar(
+        select(PromoCode).where(PromoCode.code == code, PromoCode.is_auto.is_(False))
+    )
+    if promo is None:
+        return PromoResult(error="Bunday promokod yo'q")
+    problem = _usable(promo, now)
+    if problem is None and items_total < promo.min_order:
+        problem = f"Promokod {format_sum(promo.min_order)}dan boshlab amal qiladi"
+    if problem is None and phone:
+        if promo.first_order_only and await _real_orders(session, phone):
+            problem = "Bu promokod faqat birinchi buyurtma uchun"
+        elif await _real_orders(session, phone, promo):
+            problem = "Siz bu promokoddan foydalangansiz"
+    if problem is not None:
+        return PromoResult(error=problem)
+    return PromoResult(promo, promo.discount_for(items_total), f"{code}: {describe(promo)}")
+
+
+async def _evaluate_auto(
+    session: AsyncSession, items_total: int, phone: str | None, now: datetime
+) -> PromoResult:
     promo = await session.scalar(
         select(PromoCode).where(PromoCode.is_auto.is_(True)).order_by(PromoCode.id).limit(1)
     )

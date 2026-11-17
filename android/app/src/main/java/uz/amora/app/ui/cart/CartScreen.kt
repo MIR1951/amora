@@ -135,7 +135,11 @@ fun CartScreen(
         sum + (productsById[entry.key]?.price ?: 0) * entry.value
     }
     val itemsTotal = quote?.itemsTotal ?: localItemsTotal
-    val canOrder = quote != null && quote.canOrder && !state.quoteLoading && state.quoteError == null
+    // Summa hozir qo'llangan promokod bilan hisoblanganmi (yangi kod tekshirilayotgan bo'lishi mumkin)
+    val promoFresh = state.quotePromo == state.appliedPromo
+    val codeWorks = promoFresh && state.appliedPromo != null && quote?.promoError == null
+    val canOrder = quote != null && quote.canOrder && !state.quoteLoading && state.quoteError == null &&
+        promoFresh
     // Summa birinchi marta serverdan kutilayotganda raqamlar o'rnida skelet ko'rinadi
     val quotePending = quote == null && state.quoteError == null
 
@@ -315,8 +319,8 @@ fun CartScreen(
                     PromoCard(
                         input = state.promoInput,
                         applied = state.appliedPromo,
-                        title = quote?.promoTitle,
-                        error = quote?.promoError?.takeIf { state.appliedPromo != null },
+                        title = quote?.promoTitle?.takeIf { codeWorks },
+                        error = quote?.promoError?.takeIf { promoFresh && state.appliedPromo != null },
                         onInput = vm::setPromoInput,
                         onApply = vm::applyPromo,
                         onRemove = vm::removePromo,
@@ -359,17 +363,13 @@ fun CartScreen(
                         )
                         if (quote != null && quote.discount > 0) {
                             SummaryRow(
-                                label = if (state.appliedPromo != null && quote.promoError == null) {
-                                    "Chegirma (${state.appliedPromo})"
-                                } else {
-                                    "Chegirma"
-                                },
+                                label = if (codeWorks) "Chegirma (${state.appliedPromo})" else "Chegirma",
                                 value = "−${formatSum(quote.discount)}",
                                 valueColor = scheme.success,
                             )
                             // Kod kiritmasdan berilgan chegirma: nimaga berilganini aytamiz
                             val autoTitle = quote.promoTitle
-                            if (state.appliedPromo == null && autoTitle != null) {
+                            if (!codeWorks && autoTitle != null) {
                                 Text(
                                     text = "🎉 $autoTitle",
                                     style = MaterialTheme.typography.bodySmall,
