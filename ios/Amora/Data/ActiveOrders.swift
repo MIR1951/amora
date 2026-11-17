@@ -1,0 +1,60 @@
+/// The customer's unfinished orders (port of `ActiveOrders` in android data/Stores.kt).
+///
+/// Surface:
+/// - `@MainActor @Observable final class ActiveOrders`
+///   - `init(api: ApiClient, session: SessionStore)`
+///   - `private(set) var orders: [Order]`                 // only `isActive` orders, newest first
+///   - `func refresh() async`
+///   - `var onStatusChange: (@MainActor (Order) -> Void)?` // used by LiveUpdates (missed status changes)
+/// - `func changedOrders(before: [Order], latest: [Order]) -> [Order]`
+
+import Foundation
+import Observation
+
+/// Mijozning tugallanmagan buyurtmalari: bosh sahifadagi belgi va bildirishnomalar shunga tayanadi.
+@MainActor
+@Observable
+final class ActiveOrders {
+    private(set) var orders: [Order] = []
+
+    /// Kuzatilayotgan (faol) buyurtma boshqa holatga o'tgani qayta o'qishda aniqlandi. Jonli ulanish
+    /// uzilib turgan paytda o'tkazib yuborilgan o'zgarishlar ham shu yerdan chiqadi.
+    @ObservationIgnored var onStatusChange: (@MainActor (Order) -> Void)?
+
+    private let api: ApiClient
+    private let session: SessionStore
+
+    init(api: ApiClient, session: SessionStore) {
+        self.api = api
+        self.session = session
+    }
+
+    func refresh() async {
+        if session.token == nil {
+            orders = []
+            return
+        }
+        let before = orders
+        do {
+            let latest = try await api.orders(limit: 5).orders
+            orders = latest.filter { $0.isActive }
+            for order in changedOrders(before: before, latest: latest) {
+                onStatusChange?(order)
+            }
+        } catch {
+            if let apiError = error as? ApiError, apiError.isUnauthorized {
+                orders = []
+            }
+        }
+    }
+}
+
+/// Avval faol bo'lgan buyurtmalardan qaysilari boshqa holatga o'tgan (tugaganlari ham).
+func changedOrders(before: [Order], latest: [Order]) -> [Order] {
+    var known: [Int: String] = [:]
+    for order in before { known[order.id] = order.status }
+    return latest.filter { order in
+        guard let previous = known[order.id] else { return false }
+        return previous != order.status
+    }
+}

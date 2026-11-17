@@ -1,0 +1,317 @@
+name: iOS ilova
+
+on:
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Bitta macOS ishi: ilovani yig'adi, simulyatorda sinaydi va mijozlar uchun simulyator ilovasini
+  # tayyorlaydi. Sinov shu ishning o'zida ko'tariladigan SINOV serveri bilan buyurtmaning butun
+  # yo'lini bosib o'tadi: haqiqiy kafega hech narsa yuborilmaydi.
+  build:
+    name: Yig'ish va simulyatorda sinov
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      built: ${{ steps.release.outcome == 'success' }}
+      tests: ${{ steps.uitest.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Ish papkalari va sinov serveri sozlamalari
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs" "$RUNNER_TEMP/smoke/screenshots" "$RUNNER_TEMP/out" "$RUNNER_TEMP/localhost"
+          # macOS'da docker yo'q: sinov serveri PostgreSQL o'rniga SQLite faylida ishlaydi.
+          # backend_ctl.py faqat manzilida "localhost" bor bazani qabul qiladi (haqiqiy bazaga
+          # tegmaslik uchun), shuning uchun fayl "localhost" papkasida turadi.
+          {
+            echo "AMORA_DATABASE_URL=sqlite+aiosqlite:///$RUNNER_TEMP/localhost/amora.db"
+            echo "AMORA_PUBLIC_BASE_URL=http://127.0.0.1:8000"
+            echo "AMORA_MEDIA_DIR=$RUNNER_TEMP/media"
+            # Raqamni tasdiqlash havolasi uchun (sinovda bot yo'q, havola faqat ochiladi)
+            echo "AMORA_BOT_USERNAME=amora_test_bot"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "DERIVED=$RUNNER_TEMP/dd"
+          } >> "$GITHUB_ENV"
+
+      # Runner'da bir nechta Xcode bor: 16.x ning eng yangisi tanlanadi
+      - name: Xcode 16 ni tanlash
+        run: |
+          ls /Applications | grep Xcode || true
+          XCODE=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | grep -E 'Xcode_16(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)
+          if [ -z "$XCODE" ]; then
+            XCODE=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -n 1 || true)
+          fi
+          if [ -z "$XCODE" ]; then
+            echo "Xcode 16 topilmadi"
+            exit 1
+          fi
+          echo "Tanlandi: $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Xcode loyihasini yaratish (XcodeGen)
+        run: |
+          brew install xcodegen
+          cd ios
+          xcodegen generate
+          xcodebuild -list -project Amora.xcodeproj
+
+      - name: Simulyatorni tanlash
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+          UDID=$(xcrun simctl list devices available -j | python3 ios/ci/pick_simulator.py "iPhone 16")
+          if [ -z "$UDID" ]; then
+            echo "iPhone simulyatori topilmadi"
+            exit 1
+          fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          # Yig'ish davomida simulyator orqa fonda yonib turadi
+          xcrun simctl boot "$UDID" || true
+
+      # Sinov uchun ilova: shu ishning ichidagi sinov serveriga qaratilgan (127.0.0.1:8000)
+      - name: Sinov uchun yig'ish
+        run: |
+          set -o pipefail
+          ARGS=(build-for-testing
+            -project ios/Amora.xcodeproj -scheme Amora
+            -destination "id=$UDID"
+            -derivedDataPath "$DERIVED"
+            CODE_SIGNING_ALLOWED=NO
+            AMORA_API_BASE_URL=http://127.0.0.1:8000
+            CURRENT_PROJECT_VERSION=${{ github.run_number }})
+          if command -v xcpretty >/dev/null; then
+            xcodebuild "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-build.log" | xcpretty || STATUS=$?
+          else
+            xcodebuild -quiet "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-build.log" || STATUS=$?
+          fi
+          if [ "${STATUS:-0}" != 0 ]; then
+            echo "::group::Kompilyatsiya xatolari"
+            grep -E 'error:|\*\* BUILD FAILED|\*\* TEST BUILD FAILED' "$LOGS/xcodebuild-build.log" | sort -u | head -n 200 || true
+            echo "::endgroup::"
+            exit "$STATUS"
+          fi
+
+      # Mijozlar uchun simulyator ilovasi: haqiqiy serverga qaratilgan (project.yml dagi standart
+      # AMORA_API_BASE_URL). Zip'ni ochib, Amora.app ni simulyator oynasiga sudrab tashlash kifoya.
+      - name: Simulyator ilovasini yig'ish (Release)
+        id: release
+        run: |
+          set -o pipefail
+          ARGS=(build
+            -project ios/Amora.xcodeproj -scheme Amora
+            -configuration Release
+            -sdk iphonesimulator
+            -destination "generic/platform=iOS Simulator"
+            -derivedDataPath "$RUNNER_TEMP/dd-release"
+            CODE_SIGNING_ALLOWED=NO
+            CURRENT_PROJECT_VERSION=${{ github.run_number }})
+          if command -v xcpretty >/dev/null; then
+            xcodebuild "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-release.log" | xcpretty || STATUS=$?
+          else
+            xcodebuild -quiet "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-release.log" || STATUS=$?
+          fi
+          if [ "${STATUS:-0}" != 0 ]; then
+            echo "::group::Kompilyatsiya xatolari"
+            grep -E 'error:|\*\* BUILD FAILED' "$LOGS/xcodebuild-release.log" | sort -u | head -n 200 || true
+            echo "::endgroup::"
+            exit "$STATUS"
+          fi
+          APP="$RUNNER_TEMP/dd-release/Build/Products/Release-iphonesimulator/Amora.app"
+          test -d "$APP"
+          /usr/libexec/PlistBuddy -c "Print :AmoraApiBaseUrl" "$APP/Info.plist" || true
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/out/amora-ios-simulator.zip"
+          ls -lh "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amora-ios-simulator
+          path: ${{ runner.temp }}/out/amora-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # Alembic migratsiyalari SQLite'da ishlamaydi (0003/0004 cheklovlarni ALTER bilan o'zgartiradi),
+      # shuning uchun jadvallar backend testlari kabi modellardan yaratiladi: ios/ci/init_db.py
+      - name: Sinov serverini ishga tushirish
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt aiosqlite
+          python ../ios/ci/init_db.py
+          python ../android/ci/backend_ctl.py prepare
+          nohup uvicorn app.main:app_factory --factory --host 127.0.0.1 --port 8000 > "$LOGS/backend.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health; then
+              echo
+              curl -fsS http://127.0.0.1:8000/api/v1/shop
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$LOGS/backend.log"
+          exit 1
+
+      # UI sinovi kafe xodimi va Telegram'dagi mijoz o'rnida shu server orqali backend_ctl.py ni chaqiradi
+      - name: Boshqaruv serverini ishga tushirish
+        run: |
+          nohup python ios/ci/control_server.py --host 127.0.0.1 --port 8099 > "$LOGS/control.log" 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8099/health; then exit 0; fi
+            sleep 1
+          done
+          cat "$LOGS/control.log"
+          exit 1
+
+      - name: Simulyatorni tayyorlash (joylashuv va ruxsat)
+        run: |
+          xcrun simctl bootstatus "$UDID" -b
+          # Mijoz kafedan 150 metrcha narida turadi: yetkazish hududi ichida
+          LOCATION=$(python3 ios/ci/customer_location.py http://127.0.0.1:8000)
+          echo "Simulyator joylashuvi: $LOCATION"
+          xcrun simctl location "$UDID" set "$LOCATION" || echo "[ogohlantirish] joylashuvni o'rnatib bo'lmadi"
+          # Ilovani oldindan o'rnatib, joylashuv ruxsatini beramiz: tizim oynasi sinovni to'smasin
+          APP="$DERIVED/Build/Products/Debug-iphonesimulator/Amora.app"
+          if [ -d "$APP" ]; then
+            xcrun simctl install "$UDID" "$APP" || true
+          fi
+          xcrun simctl privacy "$UDID" grant location uz.amora.app || echo "[ogohlantirish] joylashuv ruxsati berilmadi"
+
+      - name: Simulyatorda UI sinovi
+        id: uitest
+        env:
+          TEST_RUNNER_SCREENSHOT_DIR: ${{ runner.temp }}/smoke/screenshots
+          TEST_RUNNER_CONTROL_URL: http://127.0.0.1:8099
+        run: |
+          set -o pipefail
+          VIDEO="$RUNNER_TEMP/smoke/video.mp4"
+          xcrun simctl io "$UDID" recordVideo --codec h264 --force "$VIDEO" > "$LOGS/record.log" 2>&1 &
+          RECORDER=$!
+          sleep 3
+          ARGS=(test-without-building
+            -project ios/Amora.xcodeproj -scheme Amora
+            -destination "id=$UDID"
+            -derivedDataPath "$DERIVED"
+            -resultBundlePath "$LOGS/UITests.xcresult"
+            -only-testing:AmoraUITests)
+          STATUS=0
+          if command -v xcpretty >/dev/null; then
+            xcodebuild "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-test.log" | xcpretty || STATUS=$?
+          else
+            xcodebuild "${ARGS[@]}" 2>&1 | tee "$LOGS/xcodebuild-test.log" || STATUS=$?
+          fi
+          # Yozuvni to'g'ri yopish uchun SIGINT: aks holda video fayl buziladi
+          kill -INT "$RECORDER" || true
+          wait "$RECORDER" || true
+          ls -lh "$RUNNER_TEMP/smoke" "$RUNNER_TEMP/smoke/screenshots" || true
+          if [ "$STATUS" != 0 ]; then
+            echo "::group::Sinov xatolari"
+            grep -E 'error:|XCTAssert|\[XATO\]|failed|Ekranda topilmadi' "$LOGS/xcodebuild-test.log" | head -n 100 || true
+            echo "::endgroup::"
+          fi
+          exit "$STATUS"
+
+      - name: Sinov serveri jurnali
+        if: always()
+        run: |
+          tail -n 200 "$LOGS/backend.log" || true
+          echo "----- boshqaruv serveri -----"
+          tail -n 100 "$LOGS/control.log" || true
+
+      - name: Simulyator jurnali
+        if: always()
+        run: |
+          if [ -n "${UDID:-}" ]; then
+            xcrun simctl spawn "$UDID" log show --last 15m --style compact \
+              --predicate 'process == "Amora" OR subsystem == "uz.amora.app"' > "$LOGS/simulator.log" 2>&1 || true
+            tail -n 100 "$LOGS/simulator.log" || true
+          fi
+
+      - name: Jurnallarni siqish
+        if: always()
+        run: |
+          cd "$LOGS"
+          if [ -d UITests.xcresult ]; then
+            ditto -c -k --keepParent UITests.xcresult UITests.xcresult.zip && rm -rf UITests.xcresult
+          fi
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-smoke
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-logs
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Simulyator ilovasi, sinov rasmlari va videosini "ci-artifacts-ios" shoxiga yozadi: u yerdan
+  # to'g'ridan-to'g'ri yuklab olish mumkin. Shox har safar qayta yoziladi, unda faqat oxirgi
+  # yig'ilgan versiya turadi.
+  publish:
+    name: Natijalarni saqlash
+    needs: [build]
+    if: always() && needs.build.outputs.built == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: ci-artifacts-ios shoxiga yozish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir publish
+          cp artifacts/amora-ios-simulator/amora-ios-simulator.zip publish/amora-ios-simulator.zip
+          if [ -d artifacts/ios-smoke/screenshots ]; then
+            cp -r artifacts/ios-smoke/screenshots publish/screenshots
+          fi
+          # GitHub 100 MB dan katta faylni qabul qilmaydi
+          if [ -f artifacts/ios-smoke/video.mp4 ]; then
+            SIZE=$(stat -c %s artifacts/ios-smoke/video.mp4)
+            if [ "$SIZE" -lt 95000000 ]; then
+              cp artifacts/ios-smoke/video.mp4 publish/video.mp4
+            else
+              echo "Video juda katta ($SIZE bayt), shoxga yozilmadi"
+            fi
+          fi
+          printf 'run: %s\ncommit: %s\nref: %s\nsmoke: %s\n' \
+            "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$GITHUB_REF" "${{ needs.build.outputs.tests }}" > publish/BUILD.txt
+          cd publish
+          git init -q -b ci-artifacts-ios
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build $GITHUB_RUN_NUMBER"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-artifacts-ios

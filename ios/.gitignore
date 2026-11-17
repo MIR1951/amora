@@ -1,0 +1,8 @@
+# XcodeGen yaratadi (ios/project.yml dan): saqlanmaydi
+Amora.xcodeproj/
+Amora/Resources/Info.plist
+AmoraUITests/Info.plist
+build/
+DerivedData/
+*.xcuserstate
+__pycache__/
