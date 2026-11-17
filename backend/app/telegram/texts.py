@@ -576,8 +576,11 @@ def broadcast_preview(title: str, text: str, known: int) -> str:
 # ---------- Raqamni tasdiqlash (mijozlar uchun) ----------
 
 VERIFY_ASK = (
-    "Assalomu alaykum! Amora ilovasida raqamingizni tasdiqlash uchun pastdagi "
+    "Assalomu alaykum! Telefoningizdagi Amora ilovasiga kirish uchun pastdagi "
     "<b>«📱 Raqamni yuborish»</b> tugmasini bosing.\n\n"
+    "⚠️ Faqat hozir o'zingiz Amora ilovasida «Telegram orqali tasdiqlash» tugmasini bosgan "
+    "bo'lsangiz yuboring. Havolani sizga boshqa odam yuborgan bo'lsa, hech narsa bosmang: "
+    "u sizning hisobingizga kirib olishi mumkin.\n\n"
     "Raqamingiz faqat buyurtmani yetkazish uchun kerak."
 )
 VERIFY_SHARE_BUTTON = "📱 Raqamni yuborish"

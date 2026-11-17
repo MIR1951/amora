@@ -291,13 +291,14 @@ class Account(
     fun saveName(name: String) {
         val profile = session.profile.value ?: return
         session.saveProfile(profile.copy(name = name))
-        if (session.token == null) return
+        val sent = session.token ?: return
         scope.launch {
             try {
                 api.updateName(name)
             } catch (e: ApiException) {
-                // Muhim emas: ism har bir buyurtma bilan birga ham yuboriladi
-                if (e.isUnauthorized) session.signOut()
+                // Muhim emas: ism har bir buyurtma bilan birga ham yuboriladi. Shu orada yangi
+                // kalit olingan bo'lsa (raqam tasdiqlandi), eski kalitning xatosi uni o'chirmaydi
+                if (e.isUnauthorized && session.token == sent) session.signOut()
             }
         }
     }
@@ -327,12 +328,14 @@ class Account(
      * telefon hisobdan chiqarilgan bo'lishi mumkin (masalan eski hisob tasdiqlangan hisobga qo'shildi).
      */
     suspend fun refresh() {
-        if (session.token == null) return
+        val sent = session.token ?: return
         try {
             val customer = api.me()
+            // Javob kelguncha raqam tasdiqlanib, yangi kalit va profil saqlangan bo'lishi mumkin
+            if (session.token != sent) return
             session.saveProfile(Profile(customer.name, customer.phone, verified = customer.phoneVerified))
         } catch (e: ApiException) {
-            if (e.isUnauthorized) session.signOut()
+            if (e.isUnauthorized && session.token == sent) session.signOut()
         }
     }
 

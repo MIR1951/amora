@@ -62,8 +62,8 @@ data class VerifyUiState(
     val appUrl: String? = null,
     val botUrl: String? = null,
     val error: String? = null,
-    // Har oshganda Telegram ochiladi (bir martalik hodisa)
-    val openTelegram: Int = 0,
+    // Telegram ochilishi kerak (bir martalik hodisa: ochilgach telegramOpened() bilan o'chadi)
+    val pendingOpen: Boolean = false,
 )
 
 /**
@@ -92,7 +92,7 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
                         step = VerifyStep.Waiting,
                         appUrl = started.appUrl,
                         botUrl = started.botUrl,
-                        openTelegram = it.openTelegram + 1,
+                        pendingOpen = true,
                     )
                 }
                 poll(started.expiresIn)
@@ -146,13 +146,17 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
     }
 
     fun reopenTelegram() {
-        _state.update { it.copy(openTelegram = it.openTelegram + 1) }
+        _state.update { it.copy(pendingOpen = true) }
+    }
+
+    fun telegramOpened() {
+        _state.update { it.copy(pendingOpen = false) }
     }
 
     fun cancel() {
         pollJob?.cancel()
         code = null
-        _state.update { it.copy(step = VerifyStep.Idle) }
+        _state.update { it.copy(step = VerifyStep.Idle, pendingOpen = false) }
     }
 
     fun clearError() {
@@ -202,9 +206,13 @@ fun PhoneVerificationSection(
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
 
-    LaunchedEffect(state.openTelegram) {
-        if (state.openTelegram > 0 && !openTelegram(context, state.appUrl, state.botUrl)) {
-            snackbar.showSnackbar("Telegram topilmadi. Uni o'rnatib, qaytadan urinib ko'ring")
+    LaunchedEffect(state.pendingOpen) {
+        if (state.pendingOpen) {
+            // Avval o'chiramiz: ekran qayta chizilsa yoki aylantirilsa Telegram ikkinchi marta ochilmaydi
+            vm.telegramOpened()
+            if (!openTelegram(context, state.appUrl, state.botUrl)) {
+                snackbar.showSnackbar("Telegram topilmadi. Uni o'rnatib, qaytadan urinib ko'ring")
+            }
         }
     }
     LaunchedEffect(state.error) {

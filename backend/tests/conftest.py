@@ -107,6 +107,7 @@ async def verify_phone(
     name: str | None = "Ali",
     headers: dict | None = None,
     app=None,
+    telegram_id: int | None = None,
 ) -> dict:
     """Raqamni Telegram orqali tasdiqlash: ilova kod oladi, bot raqamni qabul qiladi (bu yerda
     bot o'rniga xizmat to'g'ridan-to'g'ri chaqiriladi), ilova kalitni oladi."""
@@ -115,7 +116,7 @@ async def verify_phone(
     response = await client.post("/auth/telegram", json={"name": name}, headers=headers or {})
     assert response.status_code == 201, response.text
     code = response.json()["code"]
-    telegram_id = telegram_id_for(phone)
+    telegram_id = telegram_id or telegram_id_for(phone)
     session_factory = (app or client._transport.app).state.session_factory
     async with session_factory() as session:
         assert await verify.attach_telegram(session, code, telegram_id, "Tg Ism") == "ok"

@@ -31,7 +31,7 @@ async def check(api, code: str):
 # ---------- Bot orqali to'liq yo'l ----------
 
 
-async def test_full_flow_through_the_bot(api, driver, tg, seed):
+async def test_full_flow_through_the_bot(api, driver, tg, seed, session_factory):
     started = await start(api)
     assert started["bot_url"] == f"https://t.me/amora_test_bot?start=v_{started['code']}"
     assert started["app_url"] == f"tg://resolve?domain=amora_test_bot&start=v_{started['code']}"
@@ -56,7 +56,19 @@ async def test_full_flow_through_the_bot(api, driver, tg, seed):
     auth = {"Authorization": f"Bearer {body['token']}"}
     assert (await api.post("/orders", headers=auth, json=order_body(seed))).status_code == 201
 
-    # Kod bir marta ishlaydi
+    # Javob yo'lda yo'qolsa, ilova qayta so'raydi: shu telefonga yangi kalit, eskisi bekor
+    again = await check(api, started["code"])
+    assert again.status_code == 200
+    retried = {"Authorization": f"Bearer {again.json()['token']}"}
+    assert (await api.get("/me", headers=retried)).json()["phone"] == "+998901234567"
+    assert (await api.get("/me", headers=auth)).status_code == 401
+    async with session_factory() as session:
+        assert len(list(await session.scalars(select(CustomerDevice)))) == 1
+        # Qisqa muddatdan keyin kod butunlay eskiradi
+        await session.execute(
+            update(PhoneVerification).values(expires_at=utcnow() - timedelta(seconds=1))
+        )
+        await session.commit()
     again = await check(api, started["code"])
     assert again.status_code == 410
     assert again.json()["error"]["code"] == "verification_expired"
@@ -224,6 +236,34 @@ async def test_telegram_account_changed_its_number(api, seed, session_factory):
     assert [o["id"] for o in (await api.get("/orders", headers=auth)).json()["orders"]] == [order["id"]]
 
 
+async def test_recycled_number_does_not_open_previous_owners_account(api, seed, session_factory):
+    # Raqamning eski egasi buyurtma bergan, keyin operator raqamni boshqa odamga berdi
+    old_order, old_auth = await place_order(api, seed)
+    new_owner = await verify_phone(api, "90 123 45 67", name="Yangi", telegram_id=555)
+    assert (await api.get("/orders", headers=new_owner)).json()["orders"] == []
+    me = (await api.get("/me", headers=new_owner)).json()
+    assert me["name"] == "Yangi" and me["phone_verified"] is True
+    # Eski egasining telefoni hisobdan chiqdi, buyurtmasi o'zida qoldi
+    assert (await api.get("/me", headers=old_auth)).status_code == 401
+    async with session_factory() as session:
+        old = await session.scalar(select(Customer).where(Customer.telegram_user_id == 901234567))
+        assert old.phone_verified is False
+        assert (await session.get(Order, old_order["id"])).customer_id == old.id
+    # Eski egasi yangi raqam bilan qaytsa, eski buyurtmalari yana ko'rinadi
+    back = await verify_phone(api, "93 111 22 33", telegram_id=901234567)
+    assert [o["id"] for o in (await api.get("/orders", headers=back)).json()["orders"]] == [old_order["id"]]
+
+
+async def test_recycled_number_check_from_previous_owners_phone(api, seed, session_factory):
+    # Yangi egasi raqamni eski egasining telefonidan (masalan, sotib olingan telefon) tasdiqlaydi
+    _, old_auth = await place_order(api, seed)
+    new_owner = await verify_phone(api, "90 123 45 67", headers=old_auth, telegram_id=555)
+    assert (await api.get("/orders", headers=new_owner)).json()["orders"] == []
+    async with session_factory() as session:
+        customers = list(await session.scalars(select(Customer).order_by(Customer.id)))
+    assert [(c.telegram_user_id, c.phone_verified) for c in customers] == [(901234567, False), (555, True)]
+
+
 # ---------- Bloklash ----------
 
 
@@ -245,6 +285,17 @@ async def test_block_follows_the_telegram_account(api, seed, driver, session_fac
     blocked = await api.post("/orders", headers=auth, json=order_body(seed))
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "blocked"
+
+
+async def test_block_of_merged_old_account_is_kept(api, seed, driver, session_factory):
+    # Eski ilovada boshqa raqam bilan ochilgan hisob bloklangan; shu telefondan yangi raqam tasdiqlandi
+    old = await register_unverified(api, phone="93 111 22 33")
+    await driver.say("/blok 931112233")
+    assert "bloklandi" in driver.screen
+    await register_unverified(api, phone="90 123 45 67")
+    auth = await verify_phone(api, "90 123 45 67", headers=old)
+    response = await api.post("/orders", headers=auth, json=order_body(seed))
+    assert response.status_code == 403
 
 
 async def test_blocked_number_stays_blocked_after_verification(api, seed, driver):

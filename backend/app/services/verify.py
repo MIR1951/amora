@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
 
-from sqlalchemy import delete, exists, or_, select, update
+from sqlalchemy import delete, exists, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import utcnow
@@ -24,6 +24,8 @@ from app.security import hash_token, new_token, normalize_phone
 CODE_TTL = timedelta(minutes=10)
 # Raqam botda tasdiqlangach, ilova uni shu vaqt ichida olib ketishi kerak
 CONFIRMED_TTL = timedelta(minutes=30)
+# Javob internetda yo'qolib qolsa, ilova shu vaqt ichida natijani qayta so'ray oladi
+REDEEM_GRACE = timedelta(minutes=2)
 START_PREFIX = "v_"
 DEFAULT_NAME = "Mijoz"
 
@@ -148,31 +150,25 @@ async def complete(session: AsyncSession, code: str) -> CheckResult:
         await session.rollback()
         return CheckResult(CheckStatus.UNKNOWN)
     expired = _aware(verification.expires_at) <= utcnow()
-    if verification.status == VerificationStatus.USED or expired:
+    if expired:
         await session.rollback()
         return CheckResult(CheckStatus.EXPIRED)
+    if verification.status == VerificationStatus.USED:
+        return await _redeem_again(session, verification)
     if verification.status == VerificationStatus.PENDING:
         await session.rollback()
         return CheckResult(CheckStatus.PENDING)
 
     phone = verification.phone
     telegram_user_id = verification.telegram_user_id
+    # Bir raqam yoki bir Telegram hisobi ikki telefonda bir vaqtda tasdiqlansa, ikkita mijoz
+    # ochilib qolmasligi uchun navbat bilan bajariladi
+    await _lock(session, f"phone:{phone}")
+    await _lock(session, f"tg:{telegram_user_id}")
     device = None
     if verification.device_id is not None:
         device = await session.get(CustomerDevice, verification.device_id)
     previous = await session.get(Customer, device.customer_id) if device is not None else None
-
-    # Kim bo'lishidan qat'i nazar, shu raqam yoki shu Telegram hisobi bloklangan bo'lsa, blok qoladi
-    blocked = bool(
-        await session.scalar(
-            select(
-                exists().where(
-                    Customer.is_blocked.is_(True),
-                    or_(Customer.phone == phone, Customer.telegram_user_id == telegram_user_id),
-                )
-            )
-        )
-    )
 
     customer = await session.scalar(
         select(Customer)
@@ -180,15 +176,31 @@ async def complete(session: AsyncSession, code: str) -> CheckResult:
         .order_by(Customer.id)
         .limit(1)
     )
+    if customer is not None and customer.telegram_user_id not in (None, telegram_user_id):
+        # Raqam endi boshqa Telegram hisobiniki (operator raqamni boshqa odamga bergan): eski
+        # egasining hisobi unga o'tmaydi. U o'z Telegram'iga bog'liq qoladi, telefonlari chiqadi
+        customer.phone_verified = False
+        await session.execute(
+            delete(CustomerDevice).where(
+                CustomerDevice.customer_id == customer.id,
+                CustomerDevice.id != (device.id if device is not None else -1),
+            )
+        )
+        customer = None
     if customer is None:
         # Shu Telegram hisobi avval boshqa raqam bilan tasdiqlangan: raqamini almashtirgan
         customer = await session.scalar(
             select(Customer)
-            .where(Customer.telegram_user_id == telegram_user_id, Customer.phone_verified.is_(True))
-            .order_by(Customer.id)
+            .where(Customer.telegram_user_id == telegram_user_id)
+            .order_by(Customer.phone_verified.desc(), Customer.id)
             .limit(1)
         )
-    if customer is None and previous is not None and not previous.phone_verified:
+    if (
+        customer is None
+        and previous is not None
+        and not previous.phone_verified
+        and previous.telegram_user_id is None
+    ):
         customer = previous  # shu telefondagi eski hisob tasdiqlangan hisobga aylanadi
     if customer is None:
         customer = Customer(
@@ -200,26 +212,49 @@ async def complete(session: AsyncSession, code: str) -> CheckResult:
     customer.phone = phone
     customer.phone_verified = True
     customer.telegram_user_id = telegram_user_id
-    customer.is_blocked = customer.is_blocked or blocked
     await session.execute(
         update(Customer)
         .where(Customer.telegram_user_id == telegram_user_id, Customer.id != customer.id)
         .values(telegram_user_id=None)
     )
 
-    # Shu raqam bilan tasdiqlanmasdan ochilgan hisoblar va shu telefondagi eski hisob birlashadi:
-    # buyurtmalari tasdiqlangan mijozga o'tadi, ularning boshqa qurilmalari chiqib ketadi
+    # Eski ilovada (Telegram'siz) shu raqam bilan ochilgan hisoblar va shu telefondagi eski hisob
+    # birlashadi: buyurtmalari tasdiqlangan mijozga o'tadi, ularning boshqa qurilmalari chiqib ketadi.
+    # Boshqa Telegram hisobiga bog'langan (raqami boshqa odamga o'tgan) hisob qo'shilmaydi
     merged = set(
         await session.scalars(
             select(Customer.id).where(
                 Customer.phone == phone,
                 Customer.phone_verified.is_(False),
+                Customer.telegram_user_id.is_(None),
                 Customer.id != customer.id,
             )
         )
     )
-    if previous is not None and not previous.phone_verified and previous.id != customer.id:
+    if (
+        previous is not None
+        and not previous.phone_verified
+        and previous.telegram_user_id is None
+        and previous.id != customer.id
+    ):
         merged.add(previous.id)
+
+    # Shu raqam, shu Telegram hisobi yoki qo'shilayotgan hisoblardan biri bloklangan bo'lsa, blok qoladi
+    blocked = bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    Customer.is_blocked.is_(True),
+                    or_(
+                        Customer.phone == phone,
+                        Customer.telegram_user_id == telegram_user_id,
+                        Customer.id.in_(merged | {customer.id}),
+                    ),
+                )
+            )
+        )
+    )
+    customer.is_blocked = blocked
     if merged:
         await session.execute(
             update(Order).where(Order.customer_id.in_(merged)).values(customer_id=customer.id)
@@ -246,10 +281,37 @@ async def complete(session: AsyncSession, code: str) -> CheckResult:
         device.token_hash = hash_token(token)
     if verification.platform:
         device.platform = verification.platform
-    verification.status = VerificationStatus.USED.value
     await session.flush()
+    verification.status = VerificationStatus.USED.value
+    verification.device_id = device.id
+    verification.expires_at = utcnow() + REDEEM_GRACE
     if merged:
         await session.execute(delete(Customer).where(Customer.id.in_(merged)))
     await session.commit()
     await session.refresh(customer)
     return CheckResult(CheckStatus.VERIFIED, token=token, customer=customer)
+
+
+async def _redeem_again(session: AsyncSession, verification: PhoneVerification) -> CheckResult:
+    """Tasdiqlangan, lekin javob ilovaga yetmagan bo'lishi mumkin (internet uzildi): kod faqat shu
+    ilovada bor, shuning uchun o'sha telefonga yangi kalit beriladi (oldingisi bekor bo'ladi)."""
+    device = (
+        await session.get(CustomerDevice, verification.device_id)
+        if verification.device_id is not None
+        else None
+    )
+    if device is None:
+        await session.rollback()
+        return CheckResult(CheckStatus.EXPIRED)
+    token = new_token()
+    device.token_hash = hash_token(token)
+    customer = await session.get(Customer, device.customer_id)
+    await session.commit()
+    await session.refresh(customer)
+    return CheckResult(CheckStatus.VERIFIED, token=token, customer=customer)
+
+
+async def _lock(session: AsyncSession, key: str) -> None:
+    """Tranzaksiya oxirigacha turadigan qulf (PostgreSQL). SQLite'da yozish baribir navbat bilan."""
+    if session.bind.dialect.name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
