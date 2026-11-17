@@ -1,0 +1,61 @@
+== ANR yozuvlari ==
+
+
+== Protsessor ==
+Load: 4.53 / 6.11 / 3.22
+CPU usage from 354942ms to 65801ms ago (2026-11-17 11:21:03.177 to 2026-11-17 11:25:52.318):
+  13% 525/system_server: 9.4% user + 3.9% kernel / faults: 430999 minor 2632 major
+  4.1% 388/android.hardware.graphics.composer3-service.ranchu: 0.1% user + 4% kernel / faults: 4 minor 133 major
+  3.3% 1903/com.google.android.googlequicksearchbox:search: 2.4% user + 0.8% kernel / faults: 144943 minor 4782 major
+  3.2% 1558/com.google.android.inputmethod.latin: 2.1% user + 1.1% kernel / faults: 92050 minor 1933 major
+  3% 401/surfaceflinger: 0.4% user + 2.6% kernel / faults: 938 minor 504 major
+  1.4% 1099/com.google.android.apps.nexuslauncher: 0.8% user + 0.6% kernel / faults: 79289 minor 968 major
+  1.4% 457/logcat: 0.1% user + 1.3% kernel / faults: 3 minor 1 major
+  1.1% 1726/com.google.android.as: 0.8% user + 0.3% kernel / faults: 38181 minor 1317 major
+  0.9% 36/kworker/1:1-events: 0% user + 0.9% kernel
+  0.8% 373/android.hardware.sensors-service.multihal: 0.3% user + 0.5% kernel / faults: 3 minor 6 major
+  0.8% 132/logd: 0.2% user + 0.6% kernel / faults: 5050 minor 290 major
+  0.7% 2739/com.google.android.tts: 0.6% user + 0.1% kernel / faults: 36370 minor 2971 major
+  0.7% 841/zygote64: 0.3% user + 0.3% kernel / faults: 24891 minor 6503 major
+  0.7% 1739/com.google.android.googlequicksearchbox:interactor: 0.5% user + 0.1% kernel / faults: 27799 minor 1456 major
+  0.6% 1581/com.google.android.apps.wellbeing: 0.4% user + 0.2% kernel / faults: 46649 minor 1443 major
+  0.6% 842/com.google.android.permissioncontroller: 0.4% user + 0.2% kernel / faults: 25362 minor 2790 major
+  0.6% 42/kswapd0: 0% user + 0.6% kernel
+  0.4% 127/kworker/1:2-virtio_vsock: 0% user + 0.4% kernel
+  0.5% 2041/android.process.media: 0.2% user + 0.2% kernel / faults: 6445 minor 301 major
+  0.4% 189/jbd2/dm-40-8: 0% user + 0.4% kernel
+  0.4% 1710/com.google.android.providers.media.module: 0.3% user + 0.1% kernel / faults: 14723 minor 311 major
+  0.4% 1839/com.google.android.apps.youtube.music: 0.3% user + 0.1% kernel / faults: 27393 minor 7785 major
+  0.4% 2705/com.android.chrome: 0.1% user + 0.3% kernel / faults: 24163 minor 3072 major
+
+== Kadrlar ==
+Applications Graphics Acceleration Info:
+Uptime: 402787 Realtime: 402787
+
+** Graphics info for pid 7012 [uz.amora.app] **
+
+Stats since: 207696944764ns
+Total frames rendered: 107
+Janky frames: 107 (100.00%)
+Janky frames (legacy): 106 (99.07%)
+50th percentile: 200ms
+90th percentile: 600ms
+95th percentile: 700ms
+99th percentile: 2650ms
+Number Missed Vsync: 51
+Number High input latency: 0
+Number Slow UI thread: 78
+Number Slow bitmap uploads: 19
+Number Slow issue draw commands: 107
+Number Frame deadline missed: 107
+Number Frame deadline missed (legacy): 106
+HISTOGRAM: 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=0 15ms=0 16ms=0 17ms=0 18ms=0 19ms=1 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 26ms=0 27ms=0 28ms=0 29ms=0 30ms=0 31ms=0 32ms=0 34ms=0 36ms=0 38ms=2 40ms=1 42ms=0 44ms=0 46ms=0 48ms=9 53ms=1 57ms=1 61ms=1 65ms=2 69ms=1 73ms=0 77ms=0 81ms=3 85ms=0 89ms=0 93ms=2 97ms=0 101ms=4 105ms=0 109ms=1 113ms=1 117ms=3 121ms=3 125ms=1 129ms=1 133ms=4 150ms=11 200ms=10 250ms=9 300ms=10 350ms=2 400ms=2 450ms=2 500ms=5 550ms=2 600ms=3 650ms=2 700ms=2 750ms=1 800ms=0 850ms=0 900ms=0 950ms=0 1000ms=0 1050ms=1 1100ms=0 1150ms=0 1200ms=0 1250ms=0 1300ms=1 1350ms=0 1400ms=0 1450ms=0 1500ms=0 1550ms=0 1600ms=0 1650ms=0 1700ms=0 1750ms=0 1800ms=0 1850ms=0 1900ms=0 1950ms=0 2000ms=0 2050ms=0 2100ms=0 2150ms=0 2200ms=0 2250ms=0 2300ms=0 2350ms=0 2400ms=0 2450ms=0 2500ms=0 2550ms=0 2600ms=0 2650ms=1 2700ms=0 2750ms=0 2800ms=0 2850ms=1 2900ms=0 2950ms=0 3000ms=0 3050ms=0 3100ms=0 3150ms=0 3200ms=0 3250ms=0 3300ms=0 3350ms=0 3400ms=0 3450ms=0 3500ms=0 3550ms=0 3600ms=0 3650ms=0 3700ms=0 3750ms=0 3800ms=0 3850ms=0 3900ms=0 3950ms=0 4000ms=0 4050ms=0 4100ms=0 4150ms=0 4200ms=0 4250ms=0 4300ms=0 4350ms=0 4400ms=0 4450ms=0 4500ms=0 4550ms=0 4600ms=0 4650ms=0 4700ms=0 4750ms=0 4800ms=0 4850ms=0 4900ms=0 4950ms=0
+50th gpu percentile: 4950ms
+90th gpu percentile: 4950ms
+95th gpu percentile: 4950ms
+99th gpu percentile: 4950ms
+GPU HISTOGRAM: 1ms=0 2ms=0 3ms=0 4ms=0 5ms=0 6ms=0 7ms=0 8ms=0 9ms=0 10ms=0 11ms=0 12ms=0 13ms=0 14ms=1 15ms=0 16ms=0 17ms=0 18ms=0 19ms=0 20ms=0 21ms=0 22ms=0 23ms=0 24ms=0 25ms=0 4950ms=106
+
+Pipeline=Skia (OpenGL)
+Memory policy:
+  Max surface area: 2592000
