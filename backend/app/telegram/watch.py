@@ -5,6 +5,12 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramMigrateToChat,
+    TelegramNotFound,
+)
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
@@ -63,7 +69,8 @@ async def check_delays(session_factory: SessionFactory, bot: Bot, now: datetime 
     sent = 0
     for order in orders:
         minutes = limits[order.status]
-        if not minutes or now - _waiting_since(order) < timedelta(minutes=minutes):
+        waited = now - _waiting_since(order)
+        if not minutes or waited < timedelta(minutes=minutes):
             continue
         # Avval "eslatildi" deb belgilaymiz: bot ikki nusxada ishlasa ham eslatma bitta bo'ladi
         async with session_factory() as session:
@@ -82,24 +89,37 @@ async def check_delays(session_factory: SessionFactory, bot: Bot, now: datetime 
             await session.commit()
         if claimed.rowcount != 1:
             continue
+
+        async def release_claim(order_id: int = order.id) -> None:
+            async with session_factory() as session:  # keyingi tekshiruvda yana urinamiz
+                await session.execute(
+                    update(Order.__table__)
+                    .where(Order.__table__.c.id == order_id)
+                    .values(alerted_status=None)
+                )
+                await session.commit()
+
         try:
             await bot.send_message(
                 order.tg_chat_id,
-                delay_alert_text(order, minutes),
+                delay_alert_text(order, int(waited.total_seconds() // 60)),
                 reply_to_message_id=order.tg_message_id,
                 allow_sending_without_reply=True,
             )
             sent += 1
+        except (TelegramBadRequest, TelegramForbiddenError, TelegramMigrateToChat, TelegramNotFound):
+            # Shu buyurtmaning chatiga yozib bo'lmaydi (bot guruhdan chiqarilgan, guruh
+            # o'zgargan): qayta urinish foyda bermaydi, boshqa buyurtmalarni to'sib qo'ymasin
+            log.warning("Buyurtma #%s haqida eslatma yuborilmadi", order.id, exc_info=True)
         except Exception:  # noqa: BLE001
+            # Telegram yoki tarmoq ishlamayapti: belgini qaytaramiz va keyinroq urinamiz
             log.exception("Buyurtma #%s haqida eslatma yuborilmadi", order.id)
-            async with session_factory() as session:  # keyingi tekshiruvda yana urinamiz
-                await session.execute(
-                    update(Order.__table__)
-                    .where(Order.__table__.c.id == order.id)
-                    .values(alerted_status=None)
-                )
-                await session.commit()
+            await release_claim()
             break
+        except BaseException:
+            # Bot to'xtatilmoqda (yangilash): eslatma yo'qolmasin, keyingi ishga tushishda yuboriladi
+            await asyncio.shield(release_claim())
+            raise
     return sent
 
 
@@ -174,6 +194,7 @@ async def send_daily_report(
             )
             await session.commit()
 
+    delivered = 0
     try:
         async with session_factory() as session:
             report = await build_report(
@@ -181,7 +202,6 @@ async def send_daily_report(
             )
         text = report_text(report, cfg.timezone, "oldingi kunga")
         recipients = await report_recipients(session_factory, cfg, target)
-        delivered = 0
         for chat_id in recipients:
             try:
                 await bot.send_message(chat_id, text)
@@ -189,7 +209,8 @@ async def send_daily_report(
             except Exception:  # noqa: BLE001
                 log.warning("Kunlik hisobot %s ga yuborilmadi", chat_id, exc_info=True)
     except BaseException:
-        await asyncio.shield(release_claim())
+        if not delivered:
+            await asyncio.shield(release_claim())
         raise
     if recipients and not delivered:
         await release_claim()
