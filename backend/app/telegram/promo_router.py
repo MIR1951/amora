@@ -490,14 +490,19 @@ async def cb_broadcast_send(
 ):
     data = await state.get_data()
     await state.clear()  # ikki marta bosilsa ikki marta ketmasin
+    title, text = data.get("title"), data.get("text")
+    if not title or not text:
+        # Ikkinchi bosish birinchisi bilan bir vaqtda keldi: xabar allaqachon yuborilmoqda
+        await cb_broadcast_stale(callback, session_factory)
+        return
     try:
-        await broadcast(push, data["title"], data["text"])
+        await broadcast(push, title, text)
     except PushError as error:
         log.warning("Xabar yuborilmadi: %s", error)
         async with session_factory() as session:
             await show_promo_menu(callback, session, "Yuborilmadi, birozdan keyin qayta urining")
         return
-    log.info("Mijozlarga xabar yuborildi: %r (%s)", data["title"], callback.from_user.id)
+    log.info("Mijozlarga xabar yuborildi: %r (%s)", title, callback.from_user.id)
     async with session_factory() as session:
         await show_promo_menu(callback, session, "📣 Xabar yuborildi")
 

@@ -76,6 +76,22 @@ def test_missing_credentials_disable_push(tmp_path, caplog):
     assert "Firebase kaliti o'qilmadi" in caplog.text
 
 
+def test_broken_key_disables_push(tmp_path, caplog):
+    # Kalit nusxalanganda buzilgan: bot ishga tushganda bilinadi, har bir buyurtmada emas
+    credentials = tmp_path / "firebase.json"
+    credentials.write_text(
+        json.dumps(
+            {
+                "project_id": "amora-test",
+                "client_email": "push@amora-test.iam.gserviceaccount.com",
+                "private_key": "-----BEGIN PRIVATE KEY-----\\nbuzilgan\\n-----END PRIVATE KEY-----",
+            }
+        )
+    )
+    assert not PushSender(credentials).enabled
+    assert "Firebase kaliti o'qilmadi" in caplog.text
+
+
 # ---------- Firebase bilan haqiqiy so'rovlar (mahalliy soxta server) ----------
 
 
@@ -86,7 +102,7 @@ async def fcm(tmp_path, monkeypatch):
     pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
     ).decode()
-    state = {"tokens": 0, "sent": [], "dead": set(), "assertions": []}
+    state = {"tokens": 0, "sent": [], "dead": set(), "assertions": [], "html_error": False}
 
     async def token(request):
         form = await request.post()
@@ -100,6 +116,9 @@ async def fcm(tmp_path, monkeypatch):
     async def send(request):
         assert request.headers["Authorization"].startswith("Bearer acc")
         body = await request.json()
+        if state["html_error"]:
+            # Google old tomonidagi proksi: JSON emas, HTML sahifa
+            return web.Response(text="<html><body>502 Bad Gateway</body></html>", status=502, content_type="text/html")
         state["sent"].append(body["message"])
         if body["message"].get("token") in state["dead"]:
             return web.json_response(
@@ -149,6 +168,24 @@ async def test_sender_signs_in_once_and_sends(fcm):
     assert claims["iss"] == "push@amora-test.iam.gserviceaccount.com"
     assert claims["scope"] == push_service.SCOPE
     assert [m["notification"]["title"] for m in fcm["sent"]] == ["Salom", "Yana"]
+
+
+async def test_html_error_page_is_a_push_error(fcm, api, seed, session_factory):
+    from app.models import OrderStatus
+    from app.services.orders import set_status_by_staff
+
+    fcm["html_error"] = True
+    with pytest.raises(push_service.PushError):
+        await push_service.broadcast(fcm["sender"], "Salom", "Matn")
+
+    order, auth = await place_order(api, seed)
+    await api.patch("/me", headers=auth, json={"fcm_token": "telefon-1"})
+    async with session_factory() as session:
+        await set_status_by_staff(session, order["id"], OrderStatus.ACCEPTED, "Kassir")
+    # Xato jurnalga yoziladi, token o'chirilmaydi
+    assert await notify_order_status(fcm["sender"], session_factory, order["id"]) is False
+    async with session_factory() as session:
+        assert (await session.scalar(select(Customer))).fcm_token == "telefon-1"
 
 
 async def test_order_status_push_and_dead_token_cleanup(fcm, api, seed, session_factory):
@@ -259,3 +296,28 @@ async def test_broadcast_failure_is_reported(driver, seed, tg):
     await driver.say("Matn")
     await driver.press("Yuborish")
     assert "Yuborilmadi" in tg.of_type(AnswerCallbackQuery)[-1].text
+
+
+async def test_double_tap_on_send_is_answered_once_sent_once(driver, seed, tg):
+    from aiogram.methods import AnswerCallbackQuery
+    from aiogram.types import User
+
+    from tests.telegram_fakes import ADMIN_ID
+
+    fake = FakePush()
+    driver.dispatcher["push"] = fake
+    await driver.say("/start")
+    await driver.press("Aksiyalar")
+    await driver.press("Mijozlarga xabar yuborish")
+    await driver.say("Sarlavha")
+    await driver.say("Matn")
+    tg.clear()
+    admin = User(id=ADMIN_ID, is_bot=False, first_name="Ega")
+    await asyncio.gather(
+        driver.press_data("a:bc_send:0:", admin, ADMIN_ID),
+        driver.press_data("a:bc_send:0:", admin, ADMIN_ID),
+    )
+    assert len(fake.sent) == 1
+    answers = [answer.text for answer in tg.of_type(AnswerCallbackQuery)]
+    assert len(answers) == 2
+    assert any("Xabar yuborildi" in text for text in answers)

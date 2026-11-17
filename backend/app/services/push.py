@@ -76,8 +76,10 @@ class PushSender:
             log.info("AMORA_FIREBASE_CREDENTIALS yozilmagan: push-bildirishnomalar o'chiq")
             return
         try:
-            self._credentials = load_credentials(Path(credentials_path))
-        except (OSError, ValueError, KeyError) as error:
+            credentials = load_credentials(Path(credentials_path))
+            _sign(credentials)  # kalit buzuq bo'lsa (masalan nusxalashda qatorlar buzilgan), darhol bilinadi
+            self._credentials = credentials
+        except (OSError, ValueError, KeyError, TypeError, PushError) as error:
             log.error(
                 "Firebase kaliti o'qilmadi (%s): %s. Push-bildirishnomalar o'chiq. "
                 "Fayl bormi va konteyner uni o'qiy oladimi (chmod 644) tekshiring.",
@@ -105,18 +107,7 @@ class PushSender:
                 return self._access_token
             creds = self._credentials
             now = int(time.time())
-            assertion = jwt.encode(
-                {
-                    "iss": creds.client_email,
-                    "scope": SCOPE,
-                    "aud": creds.token_uri,
-                    "iat": now,
-                    "exp": now + 3600,
-                },
-                creds.private_key,
-                algorithm="RS256",
-                headers={"kid": creds.private_key_id} if creds.private_key_id else None,
-            )
+            assertion = _sign(creds, now)
             async with self._session().post(
                 creds.token_uri,
                 data={
@@ -124,7 +115,7 @@ class PushSender:
                     "assertion": assertion,
                 },
             ) as response:
-                body = await response.json(content_type=None)
+                body = await _read_body(response)
                 if response.status != 200 or "access_token" not in body:
                     raise PushError(f"Google kirish kaliti berilmadi ({response.status}): {body}")
             self._access_token = body["access_token"]
@@ -145,7 +136,7 @@ class PushSender:
             ) as response:
                 if response.status == 200:
                     return None
-                body = await response.json(content_type=None)
+                body = await _read_body(response)
             if response.status == 401 and attempt == 0:
                 self._access_token = None  # kalit muddatidan oldin bekor qilingan: yangisini olamiz
                 continue
@@ -153,6 +144,36 @@ class PushSender:
                 return "dead"
             raise PushError(f"FCM xatosi ({response.status}): {body}")
         raise PushError("FCM kirish kaliti qabul qilinmadi")
+
+
+def _sign(creds: _Credentials, now: int | None = None) -> str:
+    """Google'ga o'zimizni tanitadigan imzolangan so'rov (service account JWT)."""
+    now = int(time.time()) if now is None else now
+    try:
+        return jwt.encode(
+            {
+                "iss": creds.client_email,
+                "scope": SCOPE,
+                "aud": creds.token_uri,
+                "iat": now,
+                "exp": now + 3600,
+            },
+            creds.private_key,
+            algorithm="RS256",
+            headers={"kid": creds.private_key_id} if creds.private_key_id else None,
+        )
+    except (jwt.PyJWTError, ValueError, TypeError) as error:
+        raise PushError(f"Firebase kaliti yaroqsiz: {error}") from error
+
+
+async def _read_body(response: aiohttp.ClientResponse) -> dict:
+    """Javob tanasi. Google ba'zan (502/503) JSON o'rniga HTML sahifa qaytaradi."""
+    text = await response.text()
+    try:
+        body = json.loads(text) if text else {}
+    except ValueError:
+        return {"raw": text[:300]}
+    return body if isinstance(body, dict) else {"raw": text[:300]}
 
 
 def _is_dead_token(status: int, body: dict) -> bool:
@@ -223,6 +244,9 @@ async def notify_order_status(
     except (PushError, aiohttp.ClientError, TimeoutError) as error:
         log.warning("Buyurtma #%s haqida push yuborilmadi: %s", order_id, error)
         return False
+    except Exception:
+        log.exception("Buyurtma #%s haqida push yuborishda kutilmagan xato", order_id)
+        return False
     if result == "dead":
         async with session_factory() as session:
             await session.execute(
@@ -239,7 +263,12 @@ async def broadcast(sender: PushSender, title: str, text: str) -> None:
     """Barcha mijozlarga. Xato bo'lsa PushError (bot adminga aytadi)."""
     try:
         result = await sender.send(broadcast_message(title, text))
+    except PushError:
+        raise
     except (aiohttp.ClientError, TimeoutError) as error:
         raise PushError(f"Firebase'ga ulanib bo'lmadi: {error}") from error
+    except Exception as error:
+        log.exception("Aksiya xabarini yuborishda kutilmagan xato")
+        raise PushError(f"Kutilmagan xato: {error}") from error
     if result is not None:
         raise PushError("Push-bildirishnomalar sozlanmagan")

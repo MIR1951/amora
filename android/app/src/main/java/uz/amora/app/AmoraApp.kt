@@ -55,7 +55,10 @@ class AmoraApp : Application() {
         // Ilova ekranda turganda server bilan jonli ulanish ushlab turiladi
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
-                override fun onStart(owner: LifecycleOwner) = container.live.onForeground()
+                override fun onStart(owner: LifecycleOwner) {
+                    container.live.onForeground()
+                    container.push.retry()
+                }
 
                 override fun onStop(owner: LifecycleOwner) = container.live.onBackground()
             },

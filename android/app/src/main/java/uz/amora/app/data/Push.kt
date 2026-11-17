@@ -40,13 +40,21 @@ class PushTokens(
         scope.launch { sync() }
     }
 
+    /** Ilova ekranga qaytdi: oldin yuborilmay qolgan bo'lsa, yana urinadi. */
+    fun retry() {
+        scope.launch { sync() }
+    }
+
     private suspend fun sync() = mutex.withLock {
         val pushToken = session.pushToken ?: return@withLock
         val authToken = session.token ?: return@withLock
-        if (session.pushTokenSentWith == authToken) return@withLock
+        // Qaysi manzil qaysi kalit bilan yuborilgani: yuborish paytida manzil yangilansa,
+        // yangisi ham yuboriladi
+        val sent = "$authToken|$pushToken"
+        if (session.pushTokenSentWith == sent) return@withLock
         try {
             api.updatePushToken(pushToken)
-            session.pushTokenSentWith = authToken
+            session.pushTokenSentWith = sent
         } catch (e: ApiException) {
             // Keyingi safar (ilova qayta ochilganda yoki kalit yangilanganda) yana urinamiz
             Log.w(TAG, "Push manzili serverga yuborilmadi: ${e.message}")
