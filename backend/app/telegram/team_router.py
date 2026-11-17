@@ -7,7 +7,7 @@ from datetime import timedelta
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -135,6 +135,12 @@ async def cb_team_remove_yes(
                 await callback.answer("Buni qila olmaysiz", show_alert=True)
                 return
             await session.delete(member)
+            # U yaratgan, hali ishlatilmagan taklif havolalari ham bekor bo'ladi
+            await session.execute(
+                update(StaffInvite)
+                .where(StaffInvite.created_by == member.telegram_id, StaffInvite.used_by.is_(None))
+                .values(expires_at=utcnow())
+            )
             await session.commit()
             log.info("%s botdan olib tashlandi (%s)", member.name, callback.from_user.id)
             notice = "Olib tashlandi"
@@ -172,6 +178,19 @@ async def accept_invite(
         if current == OWNER:
             await session.commit()
             await message.answer("Siz botning egasisiz, taklif kerak emas. /start ni bosing.")
+            return
+        # Havolani yaratgan odam hali ham shu huquqqa egami (uni olib tashlagan bo'lishlari mumkin)
+        inviter_role = await resolve_role(invite.created_by, cfg, session_factory)
+        if inviter_role is None or not can_manage(inviter_role, invite.role):
+            await session.commit()
+            await message.answer(
+                "Bu taklif havolasi endi ishlamaydi. Admindan yangi havola so'rang."
+            )
+            return
+        if current == ADMIN and invite.role == StaffRole.STAFF.value:
+            # Taklif hech qachon huquqni kamaytirmaydi: buni faqat egasi qila oladi
+            await session.commit()
+            await message.answer("Siz allaqachon adminsiz. Boshqaruv menyusi: /start")
             return
         invite.used_by = user.id
         invite.used_at = utcnow()

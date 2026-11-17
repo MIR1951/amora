@@ -144,13 +144,15 @@ class Driver:
         chat = Chat(id=chat_id or user_id, type="private" if chat_id is None else "supergroup")
         await self._feed(message=self._message(self._user(user_id), chat, text=text))
 
-    async def send_photo(self, user_id: int = ADMIN_ID) -> None:
+    async def send_photo(self, user_id: int = ADMIN_ID, caption: str | None = None) -> None:
         photo = [
             PhotoSize(file_id="small", file_unique_id="s", width=90, height=90),
             PhotoSize(file_id="big", file_unique_id="b", width=1280, height=960),
         ]
         chat = Chat(id=user_id, type="private")
-        await self._feed(message=self._message(self._user(user_id), chat, photo=photo))
+        await self._feed(
+            message=self._message(self._user(user_id), chat, photo=photo, caption=caption)
+        )
 
     async def send_location(self, latitude: float, longitude: float, user_id: int = ADMIN_ID) -> None:
         chat = Chat(id=user_id, type="private")

@@ -354,6 +354,9 @@ def team_text(owner_ids: list[int], members: list[Staff]) -> str:
         "Admin hamma narsani qila oladi. Xodim esa faqat taomni bor/tugadi qiladi, "
         "qabulni to'xtatadi, hisobot va mijoz kartasini ko'radi.",
         "",
+        "Buyurtmalar guruhidagi tugmalarni guruhning har bir a'zosi bosa oladi. "
+        "Kimnidir botdan olib tashlasangiz, guruhdan ham Telegram'da chiqarib qo'ying.",
+        "",
     ]
     for owner_id in owner_ids:
         lines.append(f"👑 Egasi · ID <code>{owner_id}</code>")

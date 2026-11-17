@@ -474,3 +474,127 @@ async def test_owner_removes_admin(driver, seed, session_factory):
     await driver.press("Ha, olib tashlansin")
     async with session_factory() as session:
         assert await session.scalar(select(Staff)) is None
+
+
+# ---------- Tekshiruvdan keyingi tuzatishlar ----------
+
+
+async def test_staff_cannot_block_with_photo_caption(driver, seed, session_factory):
+    from app.models import Customer
+
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=STAFF_PERSON, name="Sardor", role="staff"))
+        session.add(Customer(name="Ali", phone="+998901234567", token_hash="h"))
+        await session.commit()
+    await driver.send_photo(user_id=STAFF_PERSON, caption="/blok 901234567")
+    assert "faqat admin" in driver.screen
+    async with session_factory() as session:
+        customer = await session.scalar(select(Customer))
+        assert not customer.is_blocked
+
+
+async def test_removed_admins_invites_stop_working(driver, seed, session_factory):
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
+        await session.commit()
+    await start_as(driver, NEW_PERSON)
+    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
+    payload = driver.screen.split("start=", 1)[1].split()[0]
+
+    # Egasi adminni olib tashlaydi: u yaratgan havola ham ishlamay qoladi
+    await driver.say("/start")
+    await driver.press("Adminlar va xodimlar")
+    await driver.press("🗑 Vali")
+    await driver.press("Ha, olib tashlansin")
+    await start_as(driver, NEW_PERSON, payload)
+    assert "eskirgan" in driver.screen
+    await start_as(driver, STAFF_PERSON, payload)
+    assert "eskirgan" in driver.screen
+    async with session_factory() as session:
+        assert await session.scalar(select(Staff)) is None
+
+
+async def test_invite_from_demoted_inviter_is_refused(driver, seed, session_factory):
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
+        await session.commit()
+    await start_as(driver, NEW_PERSON)
+    await driver.press("Adminlar va xodimlar", user_id=NEW_PERSON)
+    await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
+    payload = driver.screen.split("start=", 1)[1].split()[0]
+    async with session_factory() as session:
+        await session.execute(update(Staff).values(role="staff"))
+        await session.commit()
+    await start_as(driver, STAFF_PERSON, payload)
+    assert "endi ishlamaydi" in driver.screen
+
+
+async def test_staff_invite_does_not_demote_admin(driver, seed, session_factory):
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
+        await session.commit()
+    payload = await invite(driver, "Xodim qo'shish")
+    await start_as(driver, NEW_PERSON, payload)
+    assert "allaqachon adminsiz" in driver.screen
+    async with session_factory() as session:
+        assert (await session.scalar(select(Staff))).role == "admin"
+    # Havola ishlatilmadi: haqiqiy xodim uni hali ham ishlata oladi
+    await start_as(driver, STAFF_PERSON, payload)
+    async with session_factory() as session:
+        member = await session.scalar(select(Staff).where(Staff.telegram_id == STAFF_PERSON))
+        assert member.role == "staff"
+
+
+async def test_daily_report_waits_for_orders_on_the_way(bot, tg, bot_cfg, session_factory, seed):
+    await set_shop(session_factory, open_time=time(9), close_time=time(23))
+    await add_order(session_factory, local(0, 12))
+    late = await add_order(session_factory, local(0, 22, 50), status=OrderStatus.DELIVERING)
+    # Yopilishda bitta buyurtma hali yo'lda: kutamiz
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 1)) is False
+    async with session_factory() as session:
+        order = await session.get(Order, late)
+        order.status = OrderStatus.DELIVERED.value
+        await session.commit()
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 20)) is True
+    text = tg.of_type(SendMessage)[0].text
+    assert "Yetkazildi: 2" in text and "160 000" in text
+
+
+async def test_daily_report_does_not_wait_forever(bot, tg, bot_cfg, session_factory, seed):
+    await set_shop(session_factory, open_time=time(9), close_time=time(23))
+    await add_order(session_factory, local(0, 22, 50), status=OrderStatus.DELIVERING)
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 30)) is False
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(1, 0, 31)) is True
+    assert "Jarayonda: 1" in tg.of_type(SendMessage)[0].text
+
+
+async def test_longer_hours_after_report_do_not_count_twice(
+    bot, tg, bot_cfg, session_factory, seed
+):
+    await set_shop(session_factory, open_time=time(9), close_time=time(22))
+    await add_order(session_factory, local(0, 12))
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 22, 1)) is True
+    await set_shop(session_factory, close_time=time(23))
+    await add_order(session_factory, local(0, 22, 30))
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 1)) is True
+    second = tg.of_type(SendMessage)[1].text
+    assert "Buyurtmalar: 1" in second
+
+
+async def test_daily_report_claim_is_released_on_error(
+    bot, tg, bot_cfg, session_factory, seed, monkeypatch
+):
+    import app.telegram.watch as watch
+
+    await set_shop(session_factory, open_time=time(9), close_time=time(23))
+    real_build = watch.build_report
+
+    async def broken(*args, **kwargs):
+        raise ConnectionError("baza uzildi")
+
+    monkeypatch.setattr(watch, "build_report", broken)
+    with pytest.raises(ConnectionError):
+        await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 1))
+    monkeypatch.setattr(watch, "build_report", real_build)
+    assert await send_daily_report(session_factory, bot, bot_cfg, local(0, 23, 2)) is True

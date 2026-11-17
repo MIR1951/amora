@@ -32,7 +32,7 @@ Telegram vaqtincha ishlamay qolsa ham buyurtma yo'qolmaydi: bot har 20 soniyada 
 
 **Kechikish eslatmasi.** Yangi buyurtma 5 daqiqa qabul qilinmasa yoki 45 daqiqadan ko'p yo'lda tursa, bot guruhdagi buyurtma xabariga javob qilib eslatma yozadi (har holat uchun bir marta). Daqiqalar sozlamalardan o'zgartiriladi, 0 yozilsa eslatma o'chadi.
 
-**Kunlik hisobot.** Kafe yopilgan zahoti (ish vaqti oxirida) o'sha ish kunining hisoboti guruhga keladi. Sozlamalardan adminlarga yuborish yoki o'chirish mumkin. Kecha-kunduz ishlaganda yarim tunda keladi.
+**Kunlik hisobot.** Kafe yopilgach o'sha ish kunining hisoboti guruhga keladi. Yopilish paytida yo'lda bo'lgan buyurtmalar yetkazilishi kutiladi (ko'pi bilan 1,5 soat), shunda ular ham tushumga kiradi. Sozlamalardan adminlarga yuborish yoki o'chirish mumkin. Kecha-kunduz ishlaganda yarim tunda keladi.
 
 **Admin bo'limi.** Egasi, adminlar va xodimlar botga shaxsiy yozishmada `/start` yozadi:
 
@@ -52,7 +52,7 @@ Telegram vaqtincha ishlamay qolsa ham buyurtma yo'qolmaydi: bot har 20 soniyada 
 3. Xodimlar uchun guruh oching va botni qo'shing. Bot guruh ID'sini o'zi yozib beradi. Uni `AMORA_ORDERS_CHAT_ID` ga yozing.
 4. `docker compose up -d` bilan qayta ishga tushiring.
 
-Token maxfiy: uni hech kimga yubormang va GitHub'ga yuklamang. Guruhdagi har bir a'zo buyurtma tugmalarini bosa oladi, shuning uchun guruhga faqat xodimlarni qo'shing.
+Token maxfiy: uni hech kimga yubormang va GitHub'ga yuklamang. Guruhdagi har bir a'zo buyurtma tugmalarini bosa oladi, shuning uchun guruhga faqat xodimlarni qo'shing. Kimnidir botdan olib tashlasangiz, guruhdan ham chiqarib qo'ying.
 
 ## API
 

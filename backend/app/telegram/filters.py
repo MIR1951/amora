@@ -86,7 +86,8 @@ class StaffLimits(BaseMiddleware):
             await event.answer("Bu amal faqat admin uchun", show_alert=True)
             return None
         if isinstance(event, Message):
-            command = _command_name(event.text)
+            # Rasm ostidagi izohdagi buyruq ham buyruq (aiogram ikkalasini ham qabul qiladi)
+            command = _command_name(event.text or event.caption)
             state = data.get("raw_state")
             if command is None and state is None:
                 return await handler(event, data)  # tushunarsiz matn: bosh menyu ko'rsatiladi

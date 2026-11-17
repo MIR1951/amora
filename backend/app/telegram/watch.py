@@ -5,12 +5,12 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.db import utcnow
-from app.models import Order, OrderStatus, ShopSettings, Staff, StaffRole
+from app.models import ACTIVE_STATUSES, Order, OrderStatus, ShopSettings, Staff, StaffRole
 from app.services.reports import build_report, business_day
 from app.services.shop import SHOP_ID, get_shop
 from app.telegram.publisher import SessionFactory
@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 WATCHED = (OrderStatus.NEW.value, OrderStatus.DELIVERING.value)
 # Server uzoq o'chiq turgan bo'lsa, eskirgan hisobotni yubormaymiz
 DAILY_REPORT_GRACE = timedelta(hours=6)
+# Yopilish vaqtida hali yo'lda bo'lgan buyurtmalar yetkazilishini shuncha kutamiz
+DAILY_REPORT_WAIT = timedelta(minutes=90)
 
 
 def _waiting_since(order: Order) -> datetime:
@@ -114,7 +116,11 @@ async def report_recipients(session_factory: SessionFactory, cfg: Settings, targ
 async def send_daily_report(
     session_factory: SessionFactory, bot: Bot, cfg: Settings, now: datetime | None = None
 ) -> bool:
-    """Ish kuni tugaganda (kafe yopilganda) o'sha kunning hisobotini bir marta yuboradi."""
+    """Ish kuni tugaganda (kafe yopilganda) o'sha kunning hisobotini bir marta yuboradi.
+
+    Yopilish paytida yo'lda bo'lgan buyurtmalar ham tushumga kirishi uchun ular tugashini
+    kutadi (ko'pi bilan DAILY_REPORT_WAIT).
+    """
     now = now or utcnow()
     table = ShopSettings.__table__
     async with session_factory() as session:
@@ -129,6 +135,22 @@ async def send_daily_report(
         previous = shop.daily_report_sent_until
         if previous is not None and previous >= end:
             return False
+        if previous is not None and previous > start:
+            # Ish vaqti hisobot yuborilgandan keyin uzaytirilgan: o'sha buyurtmalar ikki marta
+            # sanalmasin, faqat qolgan qismi yuboriladi
+            start = previous
+        if now - end < DAILY_REPORT_WAIT:
+            unfinished = await session.scalar(
+                select(func.count())
+                .select_from(Order)
+                .where(
+                    Order.created_at >= start,
+                    Order.created_at < end,
+                    Order.status.in_(ACTIVE_STATUSES),
+                )
+            )
+            if unfinished:
+                return False
         # Ikki nusxa bir vaqtda yubormasligi uchun avval belgilab olamiz
         claimed = await session.execute(
             update(table)
@@ -141,26 +163,36 @@ async def send_daily_report(
         await session.commit()
         if claimed.rowcount != 1:
             return False
-        report = await build_report(
-            session, "Kunlik hisobot", start, end, cfg.timezone, timedelta(days=1)
-        )
 
-    text = report_text(report, cfg.timezone, "oldingi kunga")
-    recipients = await report_recipients(session_factory, cfg, target)
-    delivered = 0
-    for chat_id in recipients:
-        try:
-            await bot.send_message(chat_id, text)
-            delivered += 1
-        except Exception:  # noqa: BLE001
-            log.warning("Kunlik hisobot %s ga yuborilmadi", chat_id, exc_info=True)
-    if recipients and not delivered:
-        # Telegram ishlamadi: keyingi tekshiruvda qayta urinamiz
+    async def release_claim() -> None:
+        # Yuborilmadi: keyingi tekshiruvda qayta urinamiz
         async with session_factory() as session:
             await session.execute(
-                update(table).where(table.c.id == SHOP_ID).values(daily_report_sent_until=previous)
+                update(table)
+                .where(table.c.id == SHOP_ID, table.c.daily_report_sent_until == end)
+                .values(daily_report_sent_until=previous)
             )
             await session.commit()
+
+    try:
+        async with session_factory() as session:
+            report = await build_report(
+                session, "Kunlik hisobot", start, end, cfg.timezone, timedelta(days=1)
+            )
+        text = report_text(report, cfg.timezone, "oldingi kunga")
+        recipients = await report_recipients(session_factory, cfg, target)
+        delivered = 0
+        for chat_id in recipients:
+            try:
+                await bot.send_message(chat_id, text)
+                delivered += 1
+            except Exception:  # noqa: BLE001
+                log.warning("Kunlik hisobot %s ga yuborilmadi", chat_id, exc_info=True)
+    except BaseException:
+        await asyncio.shield(release_claim())
+        raise
+    if recipients and not delivered:
+        await release_claim()
         return False
     return bool(delivered)
 
