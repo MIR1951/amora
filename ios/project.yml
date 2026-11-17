@@ -1,0 +1,114 @@
+# XcodeGen loyihasi: `cd ios && xcodegen generate` -> Amora.xcodeproj (repoda saqlanmaydi).
+# Ilova kodi Amora/ ichida; shriftlar (Resources/Fonts/*.ttf), Assets.xcassets va OFL litsenziya
+# matnlari o'z turiga qarab avtomatik "Copy Bundle Resources" bosqichiga tushadi.
+# Info.plist `info:` dan yaratiladi (Amora/Resources/Info.plist, qo'lda tahrirlanmaydi).
+name: Amora
+
+options:
+  bundleIdPrefix: uz.amora
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    # Asset katalogidan avtomatik Swift nomlari (Color.accent, ImageResource.icBack, ...) yaratilmaydi:
+    # ular ekranlardagi nomlar bilan to'qnashmasin. Rasmlar AppIcon enum orqali nomi bilan olinadi.
+    ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+targets:
+  Amora:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Amora
+    settings:
+      base:
+        PRODUCT_NAME: Amora
+        PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # Server manzili. CI sinov yig'ishida: AMORA_API_BASE_URL=http://127.0.0.1:8000
+        AMORA_API_BASE_URL: https://amora.mirjoy.uz
+        SWIFT_EMIT_LOC_STRINGS: NO
+    info:
+      path: Amora/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Amora
+        CFBundleName: Amora
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: uz
+        LSRequiresIPhoneOS: true
+        AmoraApiBaseUrl: $(AMORA_API_BASE_URL)
+        UIAppFonts:
+          - bricolage_bold.ttf
+          - bricolage_regular.ttf
+          - instrument_bold.ttf
+          - instrument_regular.ttf
+        NSLocationWhenInUseUsageDescription: Yetkazish manzilini aniqlash uchun joylashuvingiz kerak
+        LSApplicationQueriesSchemes:
+          - tg
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # Android'dagi kabi: ochilishda asosiy qizil rang ustida oq logotip
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSupportsIndirectInputEvents: true
+        ITSAppUsesNonExemptEncryption: false
+
+  AmoraUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AmoraUITests
+    dependencies:
+      - target: Amora
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app.uitests
+        TEST_TARGET_NAME: Amora
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  Amora:
+    build:
+      targets:
+        Amora: all
+        AmoraUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: AmoraUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
