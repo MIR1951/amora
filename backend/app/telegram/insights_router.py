@@ -6,12 +6,13 @@ from zoneinfo import ZoneInfo
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.models import Customer, Order, OrderItem, OrderStatus
 from app.security import normalize_phone
+from app.services import customers as customer_service
 from app.services.reports import (
     COMPARE_SHIFT,
     COMPARE_TITLE,
@@ -78,8 +79,15 @@ async def customer_card(session: AsyncSession, phone: str, tz_name: str) -> tupl
     )
     customers = list(await session.scalars(select(Customer).where(Customer.phone == phone)))
     blocked = any(customer.is_blocked for customer in customers)
+    # Tasdiqlangan mijoz ismi birinchi: u bitta, qolganlari eski buyurtmalardagi ismlar
+    customers.sort(key=lambda customer: not customer.phone_verified)
+    telegram_id = next(
+        (c.telegram_user_id for c in customers if c.phone_verified and c.telegram_user_id), None
+    )
     names: list[str] = []
-    for name in [order.customer_name for order in reversed(orders)] + [c.name for c in customers]:
+    for name in [c.name for c in customers if c.phone_verified] + [
+        order.customer_name for order in reversed(orders)
+    ] + [c.name for c in customers]:
         if name and name not in names:
             names.append(name)
     favourites = [
@@ -93,7 +101,9 @@ async def customer_card(session: AsyncSession, phone: str, tz_name: str) -> tupl
             .limit(3)
         )
     ]
-    text = texts.customer_card(phone, names[:3], orders, favourites, blocked, tz_name)
+    text = texts.customer_card(
+        phone, names[:3], orders, favourites, blocked, tz_name, telegram_id=telegram_id
+    )
     return text, blocked
 
 
@@ -136,11 +146,8 @@ async def cb_customer_block(
     blocked = callback_data.action == "cust_block"
     phone = callback_data.value
     async with session_factory() as session:
-        result = await session.execute(
-            update(Customer).where(Customer.phone == phone).values(is_blocked=blocked)
-        )
-        await session.commit()
-        if result.rowcount == 0:
+        changed = await customer_service.set_blocked(session, phone, blocked)
+        if changed == 0:
             notice = "Bu raqam bilan ro'yxatdan o'tgan mijoz yo'q"
         else:
             notice = "Bloklandi" if blocked else "Blokdan chiqarildi"

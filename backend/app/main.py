@@ -76,6 +76,8 @@ def create_app(
     app.state.events = hub
     app.state.notifier = notifier
     app.state.register_limiter = RateLimiter(cfg.register_limit_per_hour)
+    app.state.verify_limiter = RateLimiter(cfg.verify_limit_per_hour)
+    app.state.bot_username = None
 
     install_error_handlers(app)
 

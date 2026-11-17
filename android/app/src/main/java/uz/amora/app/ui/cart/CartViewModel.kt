@@ -147,7 +147,7 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
         val address = container.session.address.value
         val profile = container.session.profile.value
         val quote = current.quote
-        if (items.isEmpty() || address == null || profile == null || quote == null) return
+        if (items.isEmpty() || address == null || profile == null || !profile.verified || quote == null) return
         // Yangi kiritilgan kod hali tekshirilmagan: summa boshqacha bo'lishi mumkin
         if (current.quotePromo != current.appliedPromo) return
 

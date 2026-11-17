@@ -28,7 +28,7 @@ from app.events import (
     Subscription,
     TooManyStreams,
 )
-from app.models import STATUS_LABELS, Customer, OrderStatus
+from app.models import STATUS_LABELS, CustomerDevice, OrderStatus
 from app.security import hash_token
 
 router = APIRouter(tags=["jonli"])
@@ -141,8 +141,8 @@ async def stream_events(
         # Sessiya shu yerning o'zida yopiladi: ulanish soatlab ochiq tursa ham baza band bo'lmaydi
         async with request.app.state.session_factory() as session:
             customer_id = await session.scalar(
-                select(Customer.id).where(
-                    Customer.token_hash == hash_token(credentials.credentials)
+                select(CustomerDevice.customer_id).where(
+                    CustomerDevice.token_hash == hash_token(credentials.credentials)
                 )
             )
 

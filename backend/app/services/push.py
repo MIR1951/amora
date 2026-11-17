@@ -19,7 +19,7 @@ import jwt
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import STATUS_LABELS, Customer, Order, OrderStatus
+from app.models import STATUS_LABELS, CustomerDevice, Order, OrderStatus
 
 log = logging.getLogger(__name__)
 
@@ -221,42 +221,48 @@ def broadcast_message(title: str, text: str) -> dict:
 async def notify_order_status(
     sender: PushSender, session_factory: async_sessionmaker[AsyncSession], order_id: int
 ) -> bool:
-    """Buyurtma holati o'zgardi: mijoz telefoniga xabar. Xato bo'lsa jurnalga yozadi, xolos."""
+    """Buyurtma holati o'zgardi: mijozning barcha telefonlariga xabar. Xato bo'lsa jurnalga
+    yozadi, xolos. Kamida bittasiga yetkazilsa True."""
     if not sender.enabled:
         return False
     async with session_factory() as session:
-        row = (
+        order = await session.get(Order, order_id)
+        if order is None or order.status_enum not in NOTIFY_STATUSES:
+            return False
+        devices = (
             await session.execute(
-                select(Order, Customer.fcm_token)
-                .join(Customer, Customer.id == Order.customer_id)
-                .where(Order.id == order_id)
+                select(CustomerDevice.id, CustomerDevice.fcm_token).where(
+                    CustomerDevice.customer_id == order.customer_id,
+                    CustomerDevice.fcm_token.is_not(None),
+                )
             )
-        ).first()
-        if row is None:
-            return False
-        order, token = row
-        if not token or order.status_enum not in NOTIFY_STATUSES:
-            return False
-        message = order_message(token, order)
-        customer_id = order.customer_id
-    try:
-        result = await sender.send(message)
-    except (PushError, aiohttp.ClientError, TimeoutError) as error:
-        log.warning("Buyurtma #%s haqida push yuborilmadi: %s", order_id, error)
-        return False
-    except Exception:
-        log.exception("Buyurtma #%s haqida push yuborishda kutilmagan xato", order_id)
-        return False
-    if result == "dead":
+        ).all()
+        messages = [(device_id, token, order_message(token, order)) for device_id, token in devices]
+    delivered = False
+    dead: list[tuple[int, str]] = []
+    for device_id, token, message in messages:
+        try:
+            result = await sender.send(message)
+        except (PushError, aiohttp.ClientError, TimeoutError) as error:
+            log.warning("Buyurtma #%s haqida push yuborilmadi: %s", order_id, error)
+            continue
+        except Exception:
+            log.exception("Buyurtma #%s haqida push yuborishda kutilmagan xato", order_id)
+            continue
+        if result == "dead":
+            dead.append((device_id, token))
+        elif result is None:
+            delivered = True
+    if dead:
         async with session_factory() as session:
-            await session.execute(
-                update(Customer)
-                .where(Customer.id == customer_id, Customer.fcm_token == token)
-                .values(fcm_token=None)
-            )
+            for device_id, token in dead:
+                await session.execute(
+                    update(CustomerDevice)
+                    .where(CustomerDevice.id == device_id, CustomerDevice.fcm_token == token)
+                    .values(fcm_token=None)
+                )
             await session.commit()
-        return False
-    return result is None
+    return delivered
 
 
 async def broadcast(sender: PushSender, title: str, text: str) -> None:

@@ -58,6 +58,7 @@ class AmoraApp : Application() {
                 override fun onStart(owner: LifecycleOwner) {
                     container.live.onForeground()
                     container.push.retry()
+                    container.account.refreshInBackground()
                 }
 
                 override fun onStop(owner: LifecycleOwner) = container.live.onBackground()

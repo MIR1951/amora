@@ -67,6 +67,10 @@ def yandex_maps_url(latitude: float, longitude: float) -> str:
     return f"https://yandex.com/maps/?pt={point}&z=17&l=map"
 
 
+def telegram_link(user_id: int, label: str) -> str:
+    return f'<a href="tg://user?id={int(user_id)}">{escape(label)}</a>'
+
+
 def order_text(order: Order, tz_name: str) -> str:
     status = order.status_enum
     lines = [f"{STATUS_EMOJI[status]} <b>№{order.id} · {STATUS_TITLE[status]}</b>", ""]
@@ -88,7 +92,11 @@ def order_text(order: Order, tz_name: str) -> str:
     elif order.customer_order_no:
         customer += f" · {order.customer_order_no}-buyurtmasi"
     lines.append(customer)
-    lines.append(f"📞 {escape(order.phone)}")
+    phone_line = f"📞 {escape(order.phone)}"
+    if order.customer_telegram_id:
+        # Raqam o'chiq bo'lsa ham kuryer mijozga Telegram'da yoza yoki qo'ng'iroq qila oladi
+        phone_line += f" · {telegram_link(order.customer_telegram_id, 'Telegram')}"
+    lines.append(phone_line)
     address = escape(order.address_note) if order.address_note else "xaritada ko'rsatilgan"
     if order.distance_km is not None:
         address += f" (kafedan {order.distance_km:.1f} km)"
@@ -308,6 +316,7 @@ def customer_card(
     favourites: list[tuple[str, int]],
     blocked: bool,
     tz_name: str,
+    telegram_id: int | None = None,
 ) -> str:
     zone = ZoneInfo(tz_name)
     counts = {status: 0 for status in OrderStatus}
@@ -319,6 +328,8 @@ def customer_card(
     delivered = counts[OrderStatus.DELIVERED]
     title = ", ".join(escape(name) for name in names) or "Ismi yo'q"
     lines = [f"👤 <b>{title}</b>", f"📞 {escape(phone)}"]
+    if telegram_id:
+        lines.append(f"✅ Raqam Telegram orqali tasdiqlangan · {telegram_link(telegram_id, 'Telegramda yozish')}")
     if blocked:
         lines.append("🚫 <b>Bloklangan:</b> bu raqamdan buyurtma berib bo'lmaydi")
     lines.append("")
@@ -560,3 +571,37 @@ def broadcast_preview(title: str, text: str, known: int) -> str:
             "bildirishnomani o'chirib qo'yishi mumkin.",
         ]
     )
+
+
+# ---------- Raqamni tasdiqlash (mijozlar uchun) ----------
+
+VERIFY_ASK = (
+    "Assalomu alaykum! Amora ilovasida raqamingizni tasdiqlash uchun pastdagi "
+    "<b>«📱 Raqamni yuborish»</b> tugmasini bosing.\n\n"
+    "Raqamingiz faqat buyurtmani yetkazish uchun kerak."
+)
+VERIFY_SHARE_BUTTON = "📱 Raqamni yuborish"
+VERIFY_EXPIRED = (
+    "Bu havola eskirgan. Amora ilovasida «Telegram orqali tasdiqlash» tugmasini qaytadan bosing."
+)
+VERIFY_OTHER_USER = (
+    "Bu havola boshqa Telegram hisobida ochilgan. Ilovada «Telegram orqali tasdiqlash» "
+    "tugmasini qaytadan bosing."
+)
+VERIFY_NOT_OWN = "Faqat o'zingizning raqamingizni yuboring: pastdagi «📱 Raqamni yuborish» tugmasini bosing."
+VERIFY_NO_REQUEST = (
+    "Tasdiqlash so'rovi topilmadi yoki muddati o'tgan. Amora ilovasida «Telegram orqali "
+    "tasdiqlash» tugmasini qaytadan bosing."
+)
+VERIFY_BAD_PHONE = "Hozircha faqat O'zbekiston raqamlari (+998) bilan buyurtma berish mumkin."
+
+
+def pretty_phone(phone: str) -> str:
+    """+998901234567 -> +998 90 123 45 67"""
+    if len(phone) == 13 and phone.startswith("+998"):
+        return f"{phone[:4]} {phone[4:6]} {phone[6:9]} {phone[9:11]} {phone[11:]}"
+    return phone
+
+
+def verify_done(phone: str) -> str:
+    return f"✅ Raqamingiz tasdiqlandi: {escape(pretty_phone(phone))}\n\nEndi Amora ilovasiga qayting."

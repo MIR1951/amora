@@ -46,7 +46,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,7 +59,6 @@ import uz.amora.app.ui.components.BigButton
 import uz.amora.app.ui.components.BottomDock
 import uz.amora.app.ui.components.GlassTopBar
 import uz.amora.app.ui.components.LinkRow
-import uz.amora.app.ui.components.PhoneVisualTransformation
 import uz.amora.app.ui.components.RowDivider
 import uz.amora.app.ui.components.SectionCard
 import uz.amora.app.ui.components.SectionLabel
@@ -75,18 +73,16 @@ import uz.amora.app.ui.theme.infoContainer
 import uz.amora.app.ui.theme.ink
 import uz.amora.app.ui.theme.success
 import uz.amora.app.ui.theme.successContainer
-import uz.amora.app.util.LOCAL_PHONE_LENGTH
 import uz.amora.app.util.formatPhone
-import uz.amora.app.util.fullPhone
-import uz.amora.app.util.localPhoneDigits
 
 private const val MAX_NAME_LENGTH = 60
 
 /**
- * Mijozning ismi va telefoni. Kuryer shu raqamga qo'ng'iroq qiladi.
+ * Mijozning ismi va telefoni. Kuryer shu raqamga qo'ng'iroq qiladi. Raqam qo'lda yozilmaydi:
+ * u Telegram orqali tasdiqlanadi (soxta yoki birovning raqamini yozib bo'lmaydi).
  *
  * Ikki xil ochiladi: bosh sahifadagi "Profil" tugmasidan (manzil va kafe telefoni ham ko'rinadi)
- * yoki savatdan ism-telefonni kiritish uchun (`quickEdit`: faqat ikki maydon, saqlagach orqaga qaytadi).
+ * yoki savatdan (`quickEdit`: ism va raqam, tasdiqlangach orqaga qaytadi).
  */
 @Composable
 fun ProfileScreen(
@@ -107,24 +103,31 @@ fun ProfileScreen(
     val shop = container.catalog.state.collectAsStateWithLifecycle().value.shop
     val notifications = rememberNotificationSwitch(container)
 
-    // Saqlangan profil o'zgarsa (masalan, savat orqali tahrirlangan bo'lsa), maydonlar ham yangilanadi
-    var name by rememberSaveable(profile) { mutableStateOf(profile?.name ?: "") }
-    var phoneDigits by rememberSaveable(profile) { mutableStateOf(localPhoneDigits(profile?.phone ?: "")) }
+    // Saqlangan profil o'zgarsa (masalan, boshqa telefonda ism o'zgargan bo'lsa), maydon ham yangilanadi
+    var name by rememberSaveable(profile?.name) { mutableStateOf(profile?.name ?: "") }
 
     val cleanName = name.trim().split(Regex("\\s+")).joinToString(" ")
-    val phone = fullPhone(phoneDigits)
-    val valid = cleanName.isNotEmpty() && phone != null
-    val changed = profile == null || cleanName != profile.name || phone != profile.phone
+    val verified = profile?.verified == true
+    // Ism faqat tasdiqlangan hisobda alohida saqlanadi; yangi mijozning ismi tasdiqlash bilan ketadi
+    val canSaveName = verified && cleanName.isNotEmpty() && cleanName != profile?.name
 
     val save: () -> Unit = {
-        if (cleanName.isNotEmpty() && phone != null) {
-            container.account.saveProfile(cleanName, phone)
+        if (canSaveName) {
+            container.account.saveName(cleanName)
             focusManager.clearFocus()
             if (quickEdit) {
                 onBack()
             } else {
                 scope.launch { snackbar.showSnackbar("Saqlandi") }
             }
+        }
+    }
+    val onVerified: () -> Unit = {
+        focusManager.clearFocus()
+        if (quickEdit) {
+            onBack()
+        } else {
+            scope.launch { snackbar.showSnackbar("Raqam tasdiqlandi") }
         }
     }
 
@@ -144,9 +147,9 @@ fun ProfileScreen(
         },
         snackbarHost = { SnackbarHost(snackbar, modifier = systemBarSpace) },
         bottomBar = {
-            if (quickEdit) {
+            if (quickEdit && verified) {
                 BottomDock(glass = glass) {
-                    BigButton(text = "Saqlash", onClick = save, enabled = valid)
+                    BigButton(text = "Saqlash", onClick = save, enabled = canSaveName)
                 }
             }
         },
@@ -190,43 +193,23 @@ fun ProfileScreen(
                 colors = fieldColors(),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Words,
-                    imeAction = ImeAction.Next,
-                ),
-            )
-
-            val incomplete = phoneDigits.isNotEmpty() && phoneDigits.length < LOCAL_PHONE_LENGTH
-            TextField(
-                value = phoneDigits,
-                onValueChange = { phoneDigits = localPhoneDigits(it) },
-                label = { Text("Telefon raqam") },
-                prefix = { Text("+998 ") },
-                placeholder = { Text("90 123 45 67") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fieldBorder(),
-                shape = RoundedCornerShape(18.dp),
-                colors = fieldColors(),
-                visualTransformation = PhoneVisualTransformation,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Phone,
                     imeAction = ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(onDone = { save() }),
             )
-            AnimatedVisibility(visible = incomplete) {
-                Text(
-                    text = "Raqamni to'liq kiriting: 9 ta raqam",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.hint,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
+
+            PhoneVerificationSection(
+                container = container,
+                profile = profile,
+                name = cleanName,
+                snackbar = snackbar,
+                onVerified = onVerified,
+            )
 
             if (!quickEdit) {
                 // Tugma faqat biror narsa o'zgarganda chiqadi: o'zgarish bo'lmasa saqlaydigan narsa yo'q
-                AnimatedVisibility(visible = changed) {
-                    BigButton(text = "Saqlash", onClick = save, enabled = valid)
+                AnimatedVisibility(visible = canSaveName) {
+                    BigButton(text = "Saqlash", onClick = save)
                 }
 
                 SectionLabel("Yetkazish va aloqa")
@@ -318,10 +301,10 @@ private fun ProfileHeader(profile: Profile?) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (profile == null) {
-                        "Buyurtma berish uchun ism va telefon raqamingizni kiriting"
-                    } else {
-                        formatPhone(profile.phone)
+                    text = when {
+                        profile == null -> "Buyurtma berish uchun ismingizni yozing va raqamingizni tasdiqlang"
+                        !profile.verified -> "Raqamingizni Telegram orqali tasdiqlang"
+                        else -> formatPhone(profile.phone)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = scheme.onSurfaceVariant,

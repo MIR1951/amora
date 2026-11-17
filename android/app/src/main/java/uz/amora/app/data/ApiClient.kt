@@ -57,18 +57,29 @@ class ApiClient(
 
     // ---------- Mijoz ----------
 
-    suspend fun register(name: String, phone: String): RegisterOut = call(
+    // Kirish kaliti bo'lsa yuboriladi: shu telefondagi eski buyurtmalar tasdiqlangan hisobga o'tadi
+    suspend fun startTelegramVerification(name: String?): TelegramStart = call(
         "POST",
-        "/auth/register",
-        RegisterOut.serializer(),
-        body = json.encodeToString(RegisterIn.serializer(), RegisterIn(name = name, phone = phone)),
+        "/auth/telegram",
+        TelegramStart.serializer(),
+        body = json.encodeToString(TelegramStartIn.serializer(), TelegramStartIn(name = name)),
+        auth = true,
     )
 
-    suspend fun updateMe(name: String, phone: String): Customer = call(
+    suspend fun checkTelegramVerification(code: String): TelegramCheck = call(
+        "POST",
+        "/auth/telegram/check",
+        TelegramCheck.serializer(),
+        body = json.encodeToString(TelegramCheckIn.serializer(), TelegramCheckIn(code)),
+    )
+
+    suspend fun me(): Customer = call("GET", "/me", Customer.serializer(), auth = true)
+
+    suspend fun updateName(name: String): Customer = call(
         "PATCH",
         "/me",
         Customer.serializer(),
-        body = json.encodeToString(CustomerUpdate.serializer(), CustomerUpdate(name = name, phone = phone)),
+        body = json.encodeToString(CustomerUpdate.serializer(), CustomerUpdate(name = name)),
         auth = true,
     )
 

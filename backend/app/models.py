@@ -72,10 +72,11 @@ class Product(Base):
 
 
 class Customer(Base):
-    """Bitta qurilmadagi mijoz.
+    """Mijoz.
 
-    SMS tasdiqlash yo'q, shuning uchun telefon raqam egasini tekshira olmaymiz.
-    Buyurtmalar tarixi raqamga emas, qurilmadagi tokenga bog'lanadi: birovning
+    Raqam Telegram orqali tasdiqlangan bo'lsa (`phone_verified`), bitta raqamga bitta mijoz:
+    u bir nechta telefondan kirishi mumkin (`devices`), buyurtmalar tarixi hammasida bir xil.
+    Tasdiqlanmagan mijoz (eski ilova) faqat o'z qurilmasidagi buyurtmalarni ko'radi: birovning
     raqamini yozgan odam uning manzillarini ko'ra olmaydi.
     """
 
@@ -84,13 +85,58 @@ class Customer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(60))
     phone: Mapped[str] = mapped_column(String(13), index=True)  # +998XXXXXXXXX
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    fcm_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    platform: Mapped[str | None] = mapped_column(String(10), nullable=True)  # android / ios
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Raqamni tasdiqlagan Telegram hisobi: guruhda mijozga yozish va uni bloklash uchun
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     orders: Mapped[list["Order"]] = relationship(back_populates="customer")
+    devices: Mapped[list["CustomerDevice"]] = relationship(back_populates="customer")
+
+
+class CustomerDevice(Base):
+    """Mijoz kirgan telefon: o'z kirish kaliti va push manzili bor."""
+
+    __tablename__ = "customer_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    fcm_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(10), nullable=True)  # android / ios
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    customer: Mapped[Customer] = relationship(back_populates="devices")
+
+
+class VerificationStatus(StrEnum):
+    PENDING = "pending"  # ilova so'radi, mijoz hali botda raqamini yubormadi
+    CONFIRMED = "confirmed"  # bot raqamni oldi, ilova hali olib ketmadi
+    USED = "used"
+
+
+class PhoneVerification(Base):
+    """Raqamni Telegram orqali tasdiqlash: ilova kod oladi, mijoz botda raqamini yuboradi."""
+
+    __tablename__ = "phone_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(10), default=VerificationStatus.PENDING.value)
+    # So'ragan qurilma (eski hisob bo'lsa): tasdiqlangach u shu raqamli mijozga o'tadi
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customer_devices.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    telegram_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(13), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
 class Order(Base):
@@ -110,6 +156,8 @@ class Order(Base):
 
     customer_name: Mapped[str] = mapped_column(String(60))
     phone: Mapped[str] = mapped_column(String(13))
+    # Mijozning Telegram hisobi (raqami tasdiqlangan bo'lsa): guruhda unga bir bosishda yozish uchun
+    customer_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     latitude: Mapped[float] = mapped_column(Float)
     longitude: Mapped[float] = mapped_column(Float)
     address_note: Mapped[str] = mapped_column(String(255), default="")  # uy, kvartira, mo'ljal

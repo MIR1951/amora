@@ -14,8 +14,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.models import Category, Customer, Product
+from app.models import Category, Product
 from app.security import normalize_phone
+from app.services import customers as customer_service
 from app.services.shop import get_shop, is_open_now
 from app.telegram import keyboards as kb
 from app.telegram import texts
@@ -208,11 +209,8 @@ async def _set_blocked(message: Message, command: CommandObject, session_factory
         await message.answer(f"Raqamni buyruqdan keyin yozing, masalan:\n/{name} 901234567")
         return
     async with session_factory() as session:
-        result = await session.execute(
-            update(Customer).where(Customer.phone == phone).values(is_blocked=blocked)
-        )
-        await session.commit()
-    if result.rowcount == 0:
+        changed = await customer_service.set_blocked(session, phone, blocked)
+    if changed == 0:
         await message.answer(f"{phone} raqamli mijoz topilmadi.")
     elif blocked:
         await message.answer(f"🚫 {phone} bloklandi. Bu raqamdan endi buyurtma berib bo'lmaydi.")
