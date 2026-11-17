@@ -123,6 +123,19 @@ class QuoteIn(BaseModel):
     # Yangi ilova shuni yuboradi: birinchi buyurtma chegirmasi kod kiritmasdan qo'llanadi.
     # Eski ilovalarda summa kutilmaganda o'zgarib qolmasligi uchun standart holatda o'chiq
     apply_auto_promo: bool = False
+    # Ilova bilgan telefon (mijoz hali ro'yxatdan o'tmagan bo'lsa): birinchi buyurtma
+    # chegirmasi shu raqam bo'yicha tekshiriladi. Token yuborilsa, tokendagi raqam ustun
+    phone: str | None = Field(default=None, max_length=30)
+
+    @field_validator("phone")
+    @classmethod
+    def _normalize_quote_phone(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return normalize_phone(value)
+        except ValueError:
+            return None  # noto'g'ri raqam savat hisobiga xalaqit bermaydi
 
 
 class ProblemOut(BaseModel):

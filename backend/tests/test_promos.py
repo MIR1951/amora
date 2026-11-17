@@ -284,7 +284,7 @@ async def test_bot_banner_editing(driver, seed, session_factory):
     await driver.say("Birinchi   buyurtmaga\n−15% chegirma")
     assert "Sarlavha: <b>Birinchi buyurtmaga\n−15% chegirma</b>" in driver.screen
     await driver.press("Pastki matn")
-    await driver.say("x" * 81)
+    await driver.say("x" * 57)
     assert "Juda uzun" in driver.screen
     await driver.say("Promokod: AMORA10")
     async with session_factory() as session:
@@ -370,3 +370,52 @@ async def test_staff_cannot_open_promotions(driver, seed, tg, session_factory):
     user = User(id=888, is_bot=False, first_name="S")
     await driver.press_data("a:promo:0:", user, 888)
     assert "faqat admin" in tg.of_type(AnswerCallbackQuery)[-1].text
+
+
+# ---------- Tekshiruvdan keyingi tuzatishlar ----------
+
+
+async def test_bad_code_keeps_first_order_discount_and_order_matches(client, seed, session_factory):
+    await add_promo(session_factory, is_auto=True, value=15)
+    result = await quote(client, seed, apply_auto_promo=True, promo_code="XATO")
+    assert result["promo_error"] == "Bunday promokod yo'q"
+    assert result["discount"] == 15_000 and result["total"] == 95_000
+    assert result["promo_title"] == "Birinchi buyurtma: −15%"
+    # Ilova ishlamagan kodni buyurtmaga qo'shmaydi: summa savatdagi bilan bir xil
+    auth = await register(client)
+    response = await order(client, seed, auth, apply_auto_promo=True, expected_total=95_000)
+    assert response.status_code == 201, response.text
+
+
+async def test_quote_uses_known_phone_before_registration(client, seed, session_factory):
+    await add_promo(session_factory, is_auto=True, value=15)
+    auth = await register(client, phone="90 123 45 67")
+    assert (await order(client, seed, auth)).status_code == 201
+    # Ilova qayta o'rnatilgan: token yo'q, lekin telefon ma'lum
+    again = await quote(client, seed, apply_auto_promo=True, phone="+998 90 123 45 67")
+    assert again["discount"] == 0
+    stranger = await quote(client, seed, apply_auto_promo=True, phone="90 000 00 00")
+    assert stranger["discount"] == 15_000
+    junk = await quote(client, seed, apply_auto_promo=True, phone="abc")
+    assert junk["discount"] == 15_000
+
+
+async def test_recreated_code_is_still_once_per_customer(client, seed, auth, session_factory):
+    first = await add_promo(session_factory, code="AMORA10")
+    assert (await order(client, seed, auth, promo_code="AMORA10")).status_code == 201
+    async with session_factory() as session:
+        await session.delete(await session.get(PromoCode, first))
+        await session.commit()
+    await add_promo(session_factory, code="AMORA10")
+    result = await quote(client, seed, headers=auth, promo_code="AMORA10")
+    assert result["promo_error"] == "Siz bu promokoddan foydalangansiz"
+
+
+async def test_banner_title_lines_must_fit(driver, seed, session_factory):
+    await open_promos(driver)
+    await driver.press("Bosh sahifadagi banner")
+    await driver.press("Sarlavha")
+    await driver.say("Birinchi buyurtmaga katta chegirma\n−15%")
+    assert "Har bir qator" in driver.screen
+    async with session_factory() as session:
+        assert (await session.get(ShopSettings, 1)).banner_title is None

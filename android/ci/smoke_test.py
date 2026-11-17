@@ -210,7 +210,16 @@ def find_scrolling(needle, attempts=6):
 
 def enter_promo(code):
     """Savatdagi promokod maydoniga kod yozib, "Qo'llash"ni bosadi."""
-    find_scrolling("Qo'llash")
+    for _ in range(6):
+        if find("Qo'llash"):
+            break
+        remove = find("Olib tashlash")
+        if remove:
+            tap_node(remove)  # oldingi kod: olib tashlab, yangisini yozamiz
+            continue
+        adb("shell", "input", "swipe", "540", "1500", "540", "900", "400")
+        time.sleep(1.5)
+    wait_for("Qo'llash", timeout=10)
     fields = [node for node in nodes(dump()) if node["class"].endswith("EditText")]
     if not fields:
         raise RuntimeError("Promokod maydoni topilmadi")

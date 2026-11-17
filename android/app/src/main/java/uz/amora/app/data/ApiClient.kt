@@ -81,13 +81,14 @@ class ApiClient(
         latitude: Double?,
         longitude: Double?,
         promoCode: String? = null,
+        phone: String? = null,
     ): Quote = call(
         "POST",
         "/orders/quote",
         Quote.serializer(),
         body = json.encodeToString(
             QuoteIn.serializer(),
-            QuoteIn(items, latitude, longitude, promoCode = promoCode),
+            QuoteIn(items, latitude, longitude, promoCode = promoCode, phone = phone),
         ),
         auth = true,
     )

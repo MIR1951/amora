@@ -94,6 +94,8 @@ data class QuoteIn(
     @SerialName("promo_code") val promoCode: String? = null,
     // Birinchi buyurtma chegirmasi kod kiritmasdan qo'llanadi
     @SerialName("apply_auto_promo") val applyAutoPromo: Boolean = true,
+    // Hali ro'yxatdan o'tilmagan bo'lsa: birinchi buyurtma chegirmasi shu raqam bo'yicha tekshiriladi
+    val phone: String? = null,
 )
 
 @Serializable

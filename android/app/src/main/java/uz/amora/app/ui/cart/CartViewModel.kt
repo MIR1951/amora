@@ -28,6 +28,9 @@ data class CartUiState(
     // Mijoz yozayotgan promokod va "Qo'llash" bosilgandan keyin serverga yuborilgani
     val promoInput: String = "",
     val appliedPromo: String? = null,
+    // Ko'rsatilayotgan summa qaysi kod bilan hisoblangan: yangi kod tekshirilguncha eski
+    // natija uning ostida ko'rinmasin
+    val quotePromo: String? = null,
     val submitting: Boolean = false,
     val submitError: String? = null,
     val createdOrderId: Int? = null,
@@ -92,8 +95,11 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 request.address?.latitude,
                 request.address?.longitude,
                 request.promo,
+                container.session.profile.value?.phone,
             )
-            _state.update { it.copy(quote = quote, quoteLoading = false, quoteError = null) }
+            _state.update {
+                it.copy(quote = quote, quotePromo = request.promo, quoteLoading = false, quoteError = null)
+            }
         } catch (e: ApiException) {
             _state.update { it.copy(quoteLoading = false, quoteError = e.message) }
         }
@@ -142,6 +148,8 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
         val profile = container.session.profile.value
         val quote = current.quote
         if (items.isEmpty() || address == null || profile == null || quote == null) return
+        // Yangi kiritilgan kod hali tekshirilmagan: summa boshqacha bo'lishi mumkin
+        if (current.quotePromo != current.appliedPromo) return
 
         val comment = current.comment.trim()
         // Ishlamagan kod buyurtmaga yuborilmaydi: mijoz sababini ko'rgan, summa usiz hisoblangan

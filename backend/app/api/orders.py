@@ -79,7 +79,7 @@ async def quote(
         cfg,
         promo_code=data.promo_code,
         apply_auto_promo=data.apply_auto_promo,
-        phone=customer.phone if customer else None,
+        phone=customer.phone if customer else data.phone,
     )
     await session.commit()
     return QuoteOut(

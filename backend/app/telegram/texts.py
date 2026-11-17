@@ -387,8 +387,10 @@ def invite_text(link: str, role: str, hours: int) -> str:
 
 # ---------- Aksiyalar ----------
 
+# Ilovadagi bannerga sig'adigan o'lcham (kichik telefonda ham): sarlavha 2 qator, pastki matn 2 qator
 BANNER_TITLE_MAX = 40
-BANNER_TEXT_MAX = 80
+BANNER_TITLE_LINE_MAX = 24
+BANNER_TEXT_MAX = 56
 DEFAULT_BANNER = "Yetkazish narxi va bepul yetkazish sharti (ilova o'zi yozadi)"
 
 
@@ -446,7 +448,8 @@ def banner_prompt(field: str) -> str:
     if field == "title":
         return (
             f"Banner sarlavhasini yozing (ko'pi bilan {BANNER_TITLE_MAX} ta harf).\n"
-            "Ikki qatorga bo'lish uchun yangi qatordan yozing. Masalan:\n"
+            f"Ikki qatorga bo'lish uchun yangi qatordan yozing (har qatorda ko'pi bilan "
+            f"{BANNER_TITLE_LINE_MAX} ta harf). Masalan:\n"
             "<i>Birinchi buyurtmaga\n−15% chegirma</i>\n\n"
             "Standartga qaytarish uchun <code>-</code> yuboring."
         )
