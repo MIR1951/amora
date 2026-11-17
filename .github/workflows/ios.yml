@@ -224,6 +224,13 @@ jobs:
           # Yozuvni to'g'ri yopish uchun SIGINT: aks holda video fayl buziladi
           kill -INT "$RECORDER" || true
           wait "$RECORDER" || true
+          # Simulyator videosi juda katta (100 MB dan oshadi): macOS'ning o'z avconvert vositasi bilan
+          # 960x540 ga kichraytiramiz, shunda u ci-artifacts-ios shoxiga sig'adi
+          if [ -f "$VIDEO" ]; then
+            avconvert --source "$VIDEO" --preset Preset960x540 --output "$RUNNER_TEMP/smoke/video-small.mp4" --replace \
+              && mv "$RUNNER_TEMP/smoke/video-small.mp4" "$VIDEO" \
+              || echo "Videoni kichraytirib bo'lmadi"
+          fi
           ls -lh "$RUNNER_TEMP/smoke" "$RUNNER_TEMP/smoke/screenshots" || true
           if [ "$STATUS" != 0 ]; then
             echo "::group::Sinov xatolari"

@@ -18,9 +18,9 @@ import Foundation
 private let countryCode = "+998"
 let localPhoneLength = 9
 
-/// 25000 -> "25 000 so'm"
+/// 25000 -> "25 000 so'm". Bo'shliqlar uzilmaydigan (NBSP): summa ikki qatorga bo'linib qolmaydi.
 func formatSum(_ amount: Int) -> String {
-    formatNumber(amount) + " so'm"
+    formatNumber(amount) + "\u{00A0}so'm"
 }
 
 /// 1250000 -> "1 250 000"
@@ -29,7 +29,7 @@ func formatNumber(_ amount: Int) -> String {
     var grouped = ""
     for (index, char) in digits.enumerated() {
         if index > 0 && (digits.count - index) % 3 == 0 {
-            grouped.append(" ")
+            grouped.append("\u{00A0}")
         }
         grouped.append(char)
     }
