@@ -179,6 +179,25 @@ def shot(name):
     print(f"[rasm] {name}.png", flush=True)
 
 
+def record_progress_animation(name, seconds=6):
+    """Buyurtma chizig'idagi jonli to'lqinni videoga oladi (CI'da animatsiyalar o'chiq, shu yerda
+    vaqtincha yoqiladi). Yozib bo'lmasa sinov to'xtamaydi: bu faqat ko'rsatish uchun."""
+    remote = f"/sdcard/{name}.mp4"
+    try:
+        adb("shell", "settings", "put", "global", "animator_duration_scale", "1")
+        time.sleep(2)
+        (OUT / f"{name}.png").write_bytes(adb("exec-out", "screencap", "-p"))
+        adb("shell", "screenrecord", "--time-limit", str(seconds), "--size", "540x1200", remote)
+        (OUT / f"{name}.mp4").write_bytes(adb("exec-out", "cat", remote))
+        adb("shell", "rm", "-f", remote)
+        print(f"[video] {name}.mp4", flush=True)
+    except Exception as error:  # noqa: BLE001
+        print(f"[video] yozib bo'lmadi: {error}", flush=True)
+    finally:
+        adb("shell", "settings", "put", "global", "animator_duration_scale", "0")
+        time.sleep(1)
+
+
 def back():
     dump()
     adb("shell", "input", "keyevent", "BACK")
@@ -466,6 +485,7 @@ def scenario_full():
     staff("accepted")
     wait_for("Tayyorlanmoqda", timeout=15)
     shot("10-order-accepted")
+    record_progress_animation("10b-progress-live")
 
     # Menyudagi "faol buyurtma" belgisi
     back()
