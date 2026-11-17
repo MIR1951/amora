@@ -19,6 +19,7 @@ from app.telegram import (
     orders_router,
     promo_router,
     team_router,
+    verify_router,
 )
 from app.services.push import PushSender
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
@@ -36,6 +37,8 @@ def build_dispatcher(
     dispatcher["session_factory"] = session_factory
     dispatcher["push"] = push or PushSender(None)
     dispatcher.include_router(orders_router.router)
+    # Mijozning raqamini tasdiqlash: hamma uchun ochiq, /start va kontaktni boshqalardan oldin oladi
+    dispatcher.include_router(verify_router.router)
     # Taklif havolasi /start bilan keladi: u boshqa /start'lardan oldin tekshiriladi
     dispatcher.include_router(team_router.invite_router)
     # common admin'dan oldin turadi: aks holda adminning /id buyrug'i bosh menyuga tushib qoladi

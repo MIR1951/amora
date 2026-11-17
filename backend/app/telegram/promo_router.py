@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db import utcnow
-from app.models import Customer, Order, OrderStatus, PromoCode
+from app.models import CustomerDevice, Order, OrderStatus, PromoCode
 from app.services import promos
 from app.services.push import PushError, PushSender, broadcast
 from app.services.shop import get_shop
@@ -476,7 +476,9 @@ async def msg_broadcast_text(message: Message, state: FSMContext, session_factor
     await state.set_state(Broadcast.confirm)
     async with session_factory() as session:
         known = await session.scalar(
-            select(func.count()).select_from(Customer).where(Customer.fcm_token.is_not(None))
+            select(func.count())
+            .select_from(CustomerDevice)
+            .where(CustomerDevice.fcm_token.is_not(None))
         )
     title = (await state.get_data())["title"]
     await message.answer(

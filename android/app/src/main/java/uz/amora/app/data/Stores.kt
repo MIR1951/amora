@@ -17,8 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Mijozning ismi va telefoni. Telefon har doim `+998XXXXXXXXX` ko'rinishida. */
-data class Profile(val name: String, val phone: String)
+/**
+ * Mijozning ismi va telefoni. Telefon har doim `+998XXXXXXXXX` ko'rinishida.
+ * `verified`: raqam Telegram orqali tasdiqlangan. Ilovaning eski versiyasida qo'lda yozilgan
+ * raqam tasdiqlanmagan bo'ladi: buyurtma berishdan oldin tasdiqlash kerak.
+ */
+data class Profile(val name: String, val phone: String, val verified: Boolean = false)
 
 /** Yetkazish manzili: xaritadagi nuqta va mo'ljal. */
 data class Address(val latitude: Double, val longitude: Double, val note: String)
@@ -67,8 +71,15 @@ class SessionStore(context: Context) {
         prefs.edit()
             .putString(KEY_NAME, profile.name)
             .putString(KEY_PHONE, profile.phone)
+            .putBoolean(KEY_PHONE_VERIFIED, profile.verified)
             .apply()
         _profile.value = profile
+    }
+
+    /** Server kirish kalitini tanimadi: telefon hisobdan chiqdi, raqamni qayta tasdiqlash kerak. */
+    fun signOut() {
+        saveToken(null)
+        _profile.value?.let { saveProfile(it.copy(verified = false)) }
     }
 
     fun saveAddress(address: Address) {
@@ -83,7 +94,9 @@ class SessionStore(context: Context) {
     private fun readProfile(): Profile? {
         val name = prefs.getString(KEY_NAME, null)
         val phone = prefs.getString(KEY_PHONE, null)
-        return if (name.isNullOrBlank() || phone.isNullOrBlank()) null else Profile(name, phone)
+        if (name.isNullOrBlank() || phone.isNullOrBlank()) return null
+        val verified = prefs.getBoolean(KEY_PHONE_VERIFIED, false) && prefs.getString(KEY_TOKEN, null) != null
+        return Profile(name, phone, verified)
     }
 
     private fun readAddress(): Address? {
@@ -97,6 +110,7 @@ class SessionStore(context: Context) {
         const val KEY_TOKEN = "token"
         const val KEY_NAME = "name"
         const val KEY_PHONE = "phone"
+        const val KEY_PHONE_VERIFIED = "phone_verified"
         const val KEY_LATITUDE = "latitude"
         const val KEY_LONGITUDE = "longitude"
         const val KEY_NOTE = "address_note"
@@ -256,45 +270,102 @@ fun changedOrders(before: List<Order>, latest: List<Order>): List<Order> {
     return latest.filter { order -> known[order.id].let { it != null && it != order.status } }
 }
 
-/** Ro'yxatdan o'tish va profil. Mijoz birinchi buyurtma paytida ro'yxatdan o'tadi. */
+/** Telegram orqali tasdiqlash natijasi. */
+sealed interface VerificationResult {
+    data object Pending : VerificationResult
+
+    data class Verified(val profile: Profile) : VerificationResult
+}
+
+/**
+ * Hisob va profil. Mijoz raqamini Telegram orqali tasdiqlaydi: ilova botni ochadi, mijoz u yerda
+ * "📱 Raqamni yuborish" ni bosadi, ilova natijani so'rab turadi. Bitta raqam = bitta hisob:
+ * boshqa telefondan kirsa ham eski buyurtmalari chiqadi.
+ */
 class Account(
     private val api: ApiClient,
     private val session: SessionStore,
     private val scope: CoroutineScope,
 ) {
-    /** Profilni telefonda saqlaydi. Mijoz ro'yxatdan o'tgan bo'lsa, serverdagi profil ham yangilanadi. */
-    fun saveProfile(name: String, phone: String) {
-        session.saveProfile(Profile(name, phone))
-        if (session.token == null) return
+    /** Ismni o'zgartiradi (raqam faqat Telegram orqali almashadi). */
+    fun saveName(name: String) {
+        val profile = session.profile.value ?: return
+        session.saveProfile(profile.copy(name = name))
+        val sent = session.token ?: return
         scope.launch {
             try {
-                api.updateMe(name, phone)
+                api.updateName(name)
             } catch (e: ApiException) {
-                // Muhim emas: ism va telefon har bir buyurtma bilan birga yuboriladi.
-                if (e.isUnauthorized) session.saveToken(null)
+                // Muhim emas: ism har bir buyurtma bilan birga ham yuboriladi. Shu orada yangi
+                // kalit olingan bo'lsa (raqam tasdiqlandi), eski kalitning xatosi uni o'chirmaydi
+                if (e.isUnauthorized && session.token == sent) session.signOut()
             }
         }
     }
 
+    fun refreshInBackground() {
+        scope.launch { refresh() }
+    }
+
+    suspend fun startVerification(name: String?): TelegramStart = api.startTelegramVerification(name)
+
+    /** Mijoz botda raqamini yubordimi. Yuborgan bo'lsa, kalit va profil saqlanadi. */
+    suspend fun checkVerification(code: String): VerificationResult {
+        val result = api.checkTelegramVerification(code)
+        val token = result.token
+        val customer = result.customer
+        if (result.status != "verified" || token == null || customer == null) {
+            return VerificationResult.Pending
+        }
+        val profile = Profile(customer.name, customer.phone, verified = customer.phoneVerified)
+        session.saveProfile(profile)
+        session.saveToken(token)
+        return VerificationResult.Verified(profile)
+    }
+
     /**
-     * Kirish kaliti kerak bo'lgan so'rovni bajaradi. Kalit hali yo'q yoki eskirgan bo'lsa,
-     * saqlangan ism va telefon bilan ro'yxatdan o'tib, so'rovni qayta yuboradi.
+     * Serverdagi profil bilan solishtiradi: boshqa telefonda ism o'zgargan bo'lishi yoki bu
+     * telefon hisobdan chiqarilgan bo'lishi mumkin (masalan eski hisob tasdiqlangan hisobga qo'shildi).
      */
-    suspend fun <T> withAuth(block: suspend () -> T): T {
-        if (session.token == null) register()
-        return try {
-            block()
+    suspend fun refresh() {
+        val sent = session.token ?: return
+        try {
+            val customer = api.me()
+            // Javob kelguncha raqam tasdiqlanib, yangi kalit va profil saqlangan bo'lishi mumkin
+            if (session.token != sent) return
+            session.saveProfile(Profile(customer.name, customer.phone, verified = customer.phoneVerified))
         } catch (e: ApiException) {
-            if (!e.isUnauthorized) throw e
-            register()
-            block()
+            if (e.isUnauthorized && session.token == sent) session.signOut()
         }
     }
 
-    private suspend fun register() {
-        val profile = session.profile.value
-            ?: throw ApiException(401, "unauthorized", "Avval ism va telefon raqamingizni kiriting")
-        val result = api.register(profile.name, profile.phone)
-        session.saveToken(result.token)
+    /**
+     * Kirish kaliti kerak bo'lgan so'rovni bajaradi. Raqam tasdiqlanmagan yoki server kalitni
+     * tanimasa, mijozga raqamni tasdiqlashni aytadigan xato chiqadi.
+     */
+    suspend fun <T> withAuth(block: suspend () -> T): T {
+        if (session.token == null || session.profile.value?.verified != true) {
+            throw ApiException(403, CODE_NOT_VERIFIED, NOT_VERIFIED_MESSAGE)
+        }
+        return try {
+            block()
+        } catch (e: ApiException) {
+            when {
+                e.isUnauthorized -> {
+                    session.signOut()
+                    throw ApiException(401, CODE_NOT_VERIFIED, NOT_VERIFIED_MESSAGE)
+                }
+                e.code == CODE_NOT_VERIFIED -> {
+                    session.signOut()
+                    throw e
+                }
+                else -> throw e
+            }
+        }
+    }
+
+    companion object {
+        const val CODE_NOT_VERIFIED = "phone_not_verified"
+        const val NOT_VERIFIED_MESSAGE = "Buyurtma berish uchun raqamingizni Telegram orqali tasdiqlang"
     }
 }

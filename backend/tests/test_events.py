@@ -79,7 +79,7 @@ async def live(engine, seed):
 async def make_order(factory, seed, phone: str = "+998901234567") -> tuple[int, int]:
     """Bazaga to'g'ridan-to'g'ri bitta yangi buyurtma yozadi. (buyurtma, mijoz) raqamlarini qaytaradi."""
     async with factory() as session:
-        customer = Customer(name="Ali", phone=phone, token_hash=f"hash-{phone}")
+        customer = Customer(name="Ali", phone=phone)
         session.add(customer)
         await session.flush()
         order = Order(
@@ -184,7 +184,7 @@ async def test_change_only_inside_rolled_back_savepoint_is_not_published(live, s
         product.is_available = False
         await session.flush()
         await savepoint.rollback()
-        session.add(Customer(name="Ali", phone="+998900000001", token_hash="h1"))
+        session.add(Customer(name="Ali", phone="+998900000001"))
         await session.commit()  # saqlangan narsa menyuga aloqasi yo'q
     await assert_silent(subscription)
 
@@ -549,8 +549,8 @@ async def test_app_receives_menu_change_without_asking(cfg, engine, notifier, se
 async def test_order_status_reaches_only_the_owner(cfg, engine, notifier, seed):
     async with running_server(cfg, engine, notifier) as (app, base):
         async with httpx.AsyncClient(base_url=base, timeout=10) as http:
-            owner = await register(http, phone="90 111 11 11")
-            stranger = await register(http, phone="90 222 22 22")
+            owner = await register(http, phone="90 111 11 11", app=app)
+            stranger = await register(http, phone="90 222 22 22", app=app)
             created = await http.post(
                 "/orders",
                 headers=owner,
@@ -634,7 +634,7 @@ async def test_too_many_anonymous_streams_from_one_address_are_refused(
                 assert hub.subscriber_count == 2  # rad etilgan so'rov joy egallamadi
 
                 # Kirgan mijoz manzil hisobiga kirmaydi
-                owner = await register(http, phone="90 111 11 11")
+                owner = await register(http, phone="90 111 11 11", app=app)
                 async with http.stream("GET", "/events", headers=owner) as third:
                     assert third.status_code == 200
             await wait_for_subscribers(hub, 0)

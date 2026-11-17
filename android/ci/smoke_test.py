@@ -5,7 +5,7 @@ Ishlatilishi:  smoke_test.py readonly|full <apk fayl> <natijalar papkasi>
 
 readonly  Haqiqiy serverga qaratilgan APK uchun. Serverga faqat o'qish so'rovlari ketadi
           (menyu, kafe ma'lumoti, summa hisobi). Buyurtma BERILMAYDI va serverda mijoz
-          yaratilmaydi: ism va telefon faqat emulyatorda saqlanadi.
+          yaratilmaydi: "Telegram orqali tasdiqlash" tugmasi bosilmaydi.
 full      CI ichida ishlayotgan SINOV serveriga qaratilgan APK uchun. Buyurtma beriladi,
           kafe xodimining tugmalari o'rnini backend_ctl.py bosadi: qabul qilish, yo'lga
           chiqish, yetkazish, rad etish. Mijoz tomonidan bekor qilish va qayta buyurtma
@@ -317,8 +317,26 @@ def visible_texts():
     return labels
 
 
-def fill_cart():
-    """Menyudan savatgacha: taom qo'shish, manzil va profil. Oxirida buyurtma berishga tayyor savat."""
+def bring_app_to_front():
+    """Ilovani (ochiq turgan holida) oldinga chiqaradi: Telegram yoki brauzer ochilib qolgan bo'lsa."""
+    adb("shell", "monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1", check=False)
+    time.sleep(2)
+
+
+def verify_phone(phone):
+    """Raqamni tasdiqlash: ilova botni ochadi, mijoz o'rnida backend_ctl.py raqamni yuboradi
+    (emulyatorda Telegram yo'q). Ilova o'zi natijani olib, orqaga qaytishi kerak."""
+    tap("Telegram orqali tasdiqlash")
+    time.sleep(4)
+    shot("07a-verify-opened")
+    backend("verify", phone)
+    bring_app_to_front()
+
+
+def fill_cart(verify=True):
+    """Menyudan savatgacha: taom qo'shish, manzil va profil. Oxirida buyurtma berishga tayyor savat.
+
+    verify=False: raqam tasdiqlanmaydi (haqiqiy serverda mijoz yaratilmasin), savat shu holda qoladi."""
     wait_for("so'm", timeout=90)
     time.sleep(6)  # taom rasmlari yuklanib ulgursin
     shot("01-menu")
@@ -352,15 +370,21 @@ def fill_cart():
     shot("05-address")
     tap("Shu manzilga yetkazish")
 
-    wait_for("Ism va telefonni kiriting")
+    wait_for("Raqamni Telegram orqali tasdiqlang")
     shot("06-cart-address")
-    tap("Ism va telefonni kiriting")
+    tap("Raqamni Telegram orqali tasdiqlang")
 
-    wait_for("Saqlash")
+    wait_for("Telegram orqali tasdiqlash")
     fill_field(0, "Sinov")
-    fill_field(1, "901234567")
     shot("07-profile")
-    tap("Saqlash")
+    if not verify:
+        back()  # klaviatura
+        if find("Telegram orqali tasdiqlash"):
+            back()
+        wait_for("Raqamni tasdiqlang")
+        shot("08-cart-not-verified")
+        return
+    verify_phone("+998901234567")
 
     wait_for("Buyurtma berish", timeout=60)
     time.sleep(3)
@@ -381,7 +405,7 @@ def shot_profile(name):
 
 
 def scenario_readonly():
-    fill_cart()
+    fill_cart(verify=False)
     # "Buyurtma berish" tugmasi ATAYLAB bosilmaydi: haqiqiy kafega buyurtma ketmasin.
     back()
     open_from_home("Buyurtmalarim")

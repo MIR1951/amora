@@ -18,6 +18,7 @@ from aiogram.methods import (
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    Contact,
     File,
     InlineKeyboardMarkup,
     Location,
@@ -158,6 +159,18 @@ class Driver:
         await self._feed(
             message=self._message(self._user(user_id), chat, photo=photo, caption=caption)
         )
+
+    async def send_contact(
+        self, phone: str, user_id: int, contact_user_id: int | None = None
+    ) -> None:
+        """Mijoz "📱 Raqamni yuborish" ni bosdi (yoki kontaktlardan boshqa odamni yubordi)."""
+        chat = Chat(id=user_id, type="private")
+        contact = Contact(
+            phone_number=phone,
+            first_name="Mijoz",
+            user_id=user_id if contact_user_id is None else contact_user_id,
+        )
+        await self._feed(message=self._message(self._user(user_id), chat, contact=contact))
 
     async def send_location(self, latitude: float, longitude: float, user_id: int = ADMIN_ID) -> None:
         chat = Chat(id=user_id, type="private")

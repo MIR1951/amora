@@ -57,25 +57,39 @@ data class Customer(
     val id: Int,
     val name: String,
     val phone: String,
+    // Raqam Telegram orqali tasdiqlangan: buyurtma berish uchun shart
+    @SerialName("phone_verified") val phoneVerified: Boolean = false,
 )
 
+/** Raqamni Telegram orqali tasdiqlashni boshlash. */
 @Serializable
-data class RegisterIn(
-    val name: String,
-    val phone: String,
+data class TelegramStartIn(
+    val name: String?,
     val platform: String = "android",
 )
 
 @Serializable
-data class RegisterOut(
-    val token: String,
-    val customer: Customer,
+data class TelegramStart(
+    val code: String,
+    // Telegram ilovasini ochadi; u o'rnatilmagan bo'lsa brauzer uchun havola
+    @SerialName("app_url") val appUrl: String,
+    @SerialName("bot_url") val botUrl: String,
+    @SerialName("expires_in") val expiresIn: Int,
+)
+
+@Serializable
+data class TelegramCheckIn(val code: String)
+
+@Serializable
+data class TelegramCheck(
+    val status: String, // pending | verified
+    val token: String? = null,
+    val customer: Customer? = null,
 )
 
 @Serializable
 data class CustomerUpdate(
     val name: String? = null,
-    val phone: String? = null,
 )
 
 /** Faqat push manzilini yangilash: ism va telefonga tegilmaydi. */

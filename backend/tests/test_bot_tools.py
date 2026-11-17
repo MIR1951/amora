@@ -40,7 +40,7 @@ async def add_order(
 
         customer = await session.scalar(select(Customer).where(Customer.phone == phone))
         if customer is None:
-            customer = Customer(name="Ali", phone=phone, token_hash=f"hash-{phone}")
+            customer = Customer(name="Ali", phone=phone)
             session.add(customer)
             await session.flush()
         order = Order(
@@ -484,7 +484,7 @@ async def test_staff_cannot_block_with_photo_caption(driver, seed, session_facto
 
     async with session_factory() as session:
         session.add(Staff(telegram_id=STAFF_PERSON, name="Sardor", role="staff"))
-        session.add(Customer(name="Ali", phone="+998901234567", token_hash="h"))
+        session.add(Customer(name="Ali", phone="+998901234567"))
         await session.commit()
     await driver.send_photo(user_id=STAFF_PERSON, caption="/blok 901234567")
     assert "faqat admin" in driver.screen

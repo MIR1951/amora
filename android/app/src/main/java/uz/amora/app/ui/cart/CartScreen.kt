@@ -188,8 +188,8 @@ fun CartScreen(
                     when {
                         address == null -> BigButton(text = "Manzilni tanlang", onClick = onPickAddress)
 
-                        profile == null -> BigButton(
-                            text = "Ism va telefonni kiriting",
+                        profile == null || !profile.verified -> BigButton(
+                            text = "Raqamni tasdiqlang",
                             onClick = onEditProfile,
                         )
 
@@ -281,12 +281,12 @@ fun CartScreen(
                         LinkRow(
                             icon = R.drawable.ic_user,
                             label = "Qabul qiluvchi",
-                            value = if (profile == null) {
-                                "Ism va telefon raqamni kiriting"
+                            value = if (profile == null || !profile.verified) {
+                                "Raqamni Telegram orqali tasdiqlang"
                             } else {
                                 "${profile.name}, ${formatPhone(profile.phone)}"
                             },
-                            highlighted = profile == null,
+                            highlighted = profile == null || !profile.verified,
                             onClick = onEditProfile,
                             tileContainer = scheme.infoContainer,
                             tileTint = scheme.info,

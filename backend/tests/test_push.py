@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import select
 
-from app.models import Customer
+from app.models import Customer, CustomerDevice
 from app.services import push as push_service
 from app.services.push import PushSender, broadcast_message, notify_order_status, order_message
 from tests.conftest import register
@@ -185,7 +185,7 @@ async def test_html_error_page_is_a_push_error(fcm, api, seed, session_factory):
     # Xato jurnalga yoziladi, token o'chirilmaydi
     assert await notify_order_status(fcm["sender"], session_factory, order["id"]) is False
     async with session_factory() as session:
-        assert (await session.scalar(select(Customer))).fcm_token == "telefon-1"
+        assert (await session.scalar(select(CustomerDevice))).fcm_token == "telefon-1"
 
 
 async def test_order_status_push_and_dead_token_cleanup(fcm, api, seed, session_factory):
@@ -206,8 +206,24 @@ async def test_order_status_push_and_dead_token_cleanup(fcm, api, seed, session_
     fcm["dead"].add("telefon-1")
     assert await notify_order_status(fcm["sender"], session_factory, order["id"]) is False
     async with session_factory() as session:
-        customer = await session.scalar(select(Customer))
-        assert customer.fcm_token is None
+        device = await session.scalar(select(CustomerDevice))
+        assert device.fcm_token is None
+
+
+async def test_order_status_reaches_every_phone_of_the_customer(api, seed, session_factory):
+    from app.models import OrderStatus
+    from app.services.orders import set_status_by_staff
+    from tests.conftest import verify_phone
+
+    fake = FakePush()
+    order, first_phone = await place_order(api, seed)
+    second_phone = await verify_phone(api, "90 123 45 67")  # o'sha raqam, ikkinchi telefon
+    await api.patch("/me", headers=first_phone, json={"fcm_token": "telefon-1"})
+    await api.patch("/me", headers=second_phone, json={"fcm_token": "telefon-2"})
+    async with session_factory() as session:
+        await set_status_by_staff(session, order["id"], OrderStatus.ACCEPTED, "Kassir")
+    assert await notify_order_status(fake, session_factory, order["id"]) is True
+    assert sorted(message["token"] for message in fake.sent) == ["telefon-1", "telefon-2"]
 
 
 async def test_no_push_for_new_order_or_without_token(api, seed, session_factory):
@@ -225,7 +241,15 @@ async def test_same_phone_token_moves_to_new_account(client, seed, session_facto
     await client.patch("/me", headers=first, json={"fcm_token": "bitta-telefon"})
     await client.patch("/me", headers=second, json={"fcm_token": "bitta-telefon"})
     async with session_factory() as session:
-        tokens = dict((await session.execute(select(Customer.phone, Customer.fcm_token))).all())
+        tokens = dict(
+            (
+                await session.execute(
+                    select(Customer.phone, CustomerDevice.fcm_token).join(
+                        CustomerDevice, CustomerDevice.customer_id == Customer.id
+                    )
+                )
+            ).all()
+        )
     assert tokens == {"+998901111111": None, "+998902222222": "bitta-telefon"}
 
 

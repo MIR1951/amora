@@ -35,6 +35,8 @@ def cfg(tmp_path) -> Settings:
         media_dir=tmp_path / "media",
         max_active_orders=2,
         register_limit_per_hour=1000,
+        verify_limit_per_hour=1000,
+        bot_username="amora_test_bot",
     )
 
 
@@ -94,7 +96,47 @@ async def client(cfg, engine, notifier):
         yield client
 
 
-async def register(client: httpx.AsyncClient, name="Ali", phone="90 123 45 67") -> dict:
+def telegram_id_for(phone: str) -> int:
+    """Sinovlarda har bir raqamning o'z Telegram hisobi bor."""
+    return int("".join(char for char in phone if char.isdigit())[-9:])
+
+
+async def verify_phone(
+    client: httpx.AsyncClient,
+    phone: str,
+    name: str | None = "Ali",
+    headers: dict | None = None,
+    app=None,
+    telegram_id: int | None = None,
+) -> dict:
+    """Raqamni Telegram orqali tasdiqlash: ilova kod oladi, bot raqamni qabul qiladi (bu yerda
+    bot o'rniga xizmat to'g'ridan-to'g'ri chaqiriladi), ilova kalitni oladi."""
+    from app.services import verify
+
+    response = await client.post("/auth/telegram", json={"name": name}, headers=headers or {})
+    assert response.status_code == 201, response.text
+    code = response.json()["code"]
+    telegram_id = telegram_id or telegram_id_for(phone)
+    session_factory = (app or client._transport.app).state.session_factory
+    async with session_factory() as session:
+        assert await verify.attach_telegram(session, code, telegram_id, "Tg Ism") == "ok"
+    async with session_factory() as session:
+        result, _ = await verify.confirm_contact(session, telegram_id, phone)
+        assert result == "ok"
+    response = await client.post("/auth/telegram/check", json={"code": code})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "verified"
+    return {"Authorization": f"Bearer {body['token']}"}
+
+
+async def register(client: httpx.AsyncClient, name="Ali", phone="90 123 45 67", app=None) -> dict:
+    """Buyurtma bera oladigan mijoz: raqami Telegram orqali tasdiqlangan."""
+    return await verify_phone(client, phone, name, app=app)
+
+
+async def register_unverified(client: httpx.AsyncClient, name="Ali", phone="90 123 45 67") -> dict:
+    """Eski ilova: raqam tasdiqlanmagan."""
     response = await client.post("/auth/register", json={"name": name, "phone": phone})
     assert response.status_code == 201, response.text
     return {"Authorization": f"Bearer {response.json()['token']}"}

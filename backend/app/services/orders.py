@@ -215,8 +215,16 @@ async def create_order(
     """Buyurtma yaratadi. (buyurtma, yangi_yaratildimi) qaytaradi."""
     client_order_id = str(data.client_order_id) if data.client_order_id else None
     customer_id = customer.id  # rollback'dan keyin customer obyektiga murojaat qilib bo'lmaydi
-    phone = data.phone or customer.phone
+    if not customer.phone_verified:
+        raise ApiError(
+            403,
+            "phone_not_verified",
+            "Buyurtma berish uchun raqamingizni Telegram orqali tasdiqlang. Ilovani yangilang",
+        )
+    # Kuryer tasdiqlangan raqamga qo'ng'iroq qiladi: ilova boshqa raqam yuborsa ham shu olinadi
+    phone = customer.phone
     name = data.name or customer.name
+    telegram_id = customer.telegram_user_id
 
     if customer.is_blocked or await is_phone_blocked(session, phone):
         raise ApiError(403, "blocked", "Buyurtma berish imkoni cheklangan. Kafe bilan bog'laning")
@@ -276,6 +284,7 @@ async def create_order(
         status=OrderStatus.NEW.value,
         customer_name=name,
         phone=phone,
+        customer_telegram_id=telegram_id,
         latitude=data.latitude,
         longitude=data.longitude,
         address_note=data.address_note,

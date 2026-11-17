@@ -21,12 +21,16 @@ class Settings(BaseSettings):
 
     # Telegram (2-bosqichda ishlatiladi)
     bot_token: str = ""
+    # Raqamni tasdiqlash havolasi uchun (masalan amora_kafebot). Yozilmasa, bot tokeni orqali olinadi
+    bot_username: str = ""
     orders_chat_id: int | None = None
     admin_ids: str = ""  # vergul bilan ajratilgan Telegram user id'lar
 
     # Soxta buyurtmalardan himoya
     max_active_orders: int = 2
     register_limit_per_hour: int = 10
+    # Bitta IP manzildan soatiga nechta tasdiqlash so'rovi (mobil internetda ko'p odam bitta IP'da)
+    verify_limit_per_hour: int = 30
 
     # Firebase service account kaliti (JSON). Yozilmasa push-bildirishnomalar o'chiq
     firebase_credentials: Path | None = None

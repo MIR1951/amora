@@ -12,7 +12,7 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 ## Server qanday ishlaydi
 
 - **Menyu.** Taomlar, narxlar va rasmlar bazada turadi. Tugab qolgan taom o'chirilmaydi, `is_available: false` bo'lib qoladi.
-- **Mijoz.** SMS tasdiqlash yo'q: mijoz ism va raqamini yozadi, server qurilmaga maxfiy token beradi. Buyurtmalar tarixi raqamga emas, shu tokenga bog'langan, shuning uchun birovning raqamini yozgan odam uning manzillarini ko'ra olmaydi.
+- **Mijoz.** Raqam Telegram orqali tasdiqlanadi (bepul, SMS kerak emas): ilova botni `t.me/<bot>?start=v_<kod>` havolasi bilan ochadi, mijoz botda "📱 Raqamni yuborish" ni bosadi. Telegram faqat hisob egasining o'z raqamini yuboradi, shuning uchun birovning raqamini yozib bo'lmaydi. Bitta raqam = bitta mijoz: u bir nechta telefondan kirishi mumkin, har bir telefonning o'z maxfiy kaliti bor, buyurtmalar tarixi hammasida bir xil. Raqam tasdiqlanganda shu raqam bilan avval (eski ilovada) ochilgan hisoblarning buyurtmalari ham unga qo'shiladi. Buyurtma faqat tasdiqlangan raqam bilan beriladi. Guruhdagi buyurtmada mijozning Telegram'iga havola bor, bloklash Telegram hisobi bo'yicha ham ishlaydi.
 - **Buyurtma.** Summa har doim serverda bazadagi narxlar bo'yicha hisoblanadi. Ilova yuborgan narxga ishonilmaydi.
 - **Holatlar.** `new` (kafe javobi kutilmoqda) → `accepted` (tayyorlanmoqda) → `delivering` (kuryer yo'lda) → `delivered`. Kafe istalgan bosqichda rad etishi mumkin (`rejected`), mijoz faqat kafe qabul qilguncha bekor qila oladi (`cancelled`).
 - **Yetkazish narxi.** Belgilangan narx, ixtiyoriy "falon summadan bepul" chegarasi va ixtiyoriy masofa chegarasi (kafedan necha km gacha).
@@ -63,7 +63,9 @@ Barcha manzillar `/api/v1` bilan boshlanadi. To'liq interaktiv hujjat server ish
 |---|---|
 | `GET /menu` | Kategoriyalar va taomlar |
 | `GET /shop` | Ish vaqti, yetkazish narxi, kafe hozir ochiqmi |
-| `POST /auth/register` | Ism va telefon bilan ro'yxatdan o'tish, token qaytaradi |
+| `POST /auth/telegram` | Raqamni Telegram orqali tasdiqlashni boshlash: kod va bot havolasi |
+| `POST /auth/telegram/check` | Mijoz botda raqamini yubordimi: `pending` yoki `verified` + token |
+| `POST /auth/register` | Eski ilovalar uchun: raqam tasdiqlanmaydi, bunday hisob buyurtma bera olmaydi |
 | `GET /me`, `PATCH /me` | Profil |
 | `POST /orders/quote` | Savatni hisoblash: summa, yetkazish narxi, chegirma (`promo_code`, `apply_auto_promo`), buyurtma berish mumkinmi |
 | `POST /orders` | Buyurtma berish |
@@ -155,7 +157,7 @@ Dizayn asosi `android/app/src/main/java/uz/amora/app/ui/theme/Theme.kt` da (rang
 
 Qanday ishlaydi:
 
-- Mijoz menyuni ro'yxatdan o'tmasdan ko'radi. Birinchi buyurtma paytida ism va telefon so'raladi, server bergan kalit telefonda saqlanadi.
+- Mijoz menyuni ro'yxatdan o'tmasdan ko'radi. Birinchi buyurtma paytida ism so'raladi va raqam Telegram orqali tasdiqlanadi, server bergan kalit telefonda saqlanadi.
 - Xarita OpenStreetMap: kalit ham, to'lov ham kerak emas. Joylashuv Google xizmatlarisiz, telefonning o'z GPS'i orqali aniqlanadi.
 - Ilova ochiq turganda server bilan jonli ulanish ushlab turiladi (`data/Realtime.kt`, `data/LiveUpdates.kt`): menyu, kafe holati, faol buyurtmalar va ochiq turgan buyurtma ekrani serverdagi o'zgarishdan keyin o'zi yangilanadi. Ulanish uzilsa, ilova o'zi qayta ulanadi va shu orada avvalgidek vaqti-vaqti bilan so'rab turadi (buyurtma holati har 7 soniyada).
 - Buyurtma holati o'zgarganda bildirishnoma chiqadi (`notify/OrderNotifier.kt`), bosilsa o'sha buyurtma ochiladi. Ruxsat birinchi buyurtmadan keyin so'raladi, keyin profil sahifasidagi "Bildirishnomalar" qatoridan boshqariladi. Ilova ochiq paytda bildirishnoma jonli ulanishdan keladi, yopiq paytda esa Firebase (FCM) orqali. Ikkala yo'l bitta joydan o'tadi, shuning uchun bitta o'zgarish uchun bitta bildirishnoma chiqadi. Kafe botdagi "📣 Mijozlarga xabar yuborish" orqali ilovani o'rnatgan hamma telefonga aksiya xabarini yuboradi (bepul).

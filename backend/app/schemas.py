@@ -79,11 +79,43 @@ class CustomerOut(BaseModel):
     id: int
     name: str
     phone: str
+    # Raqam Telegram orqali tasdiqlangan: buyurtma berish uchun shart
+    phone_verified: bool = False
 
 
 class RegisterOut(BaseModel):
     token: str
     customer: CustomerOut
+
+
+class TelegramStartIn(BaseModel):
+    # Yangi mijoz uchun ism (avval tasdiqlangan raqam bo'lsa, o'sha mijozning ismi qoladi)
+    name: str | None = Field(default=None, max_length=60)
+    platform: Literal["android", "ios"] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str | None) -> str | None:
+        return (_clean(value) or None) if value is not None else None
+
+
+class TelegramStartOut(BaseModel):
+    code: str
+    # Botni ochadigan havolalar: Telegram ilovasi uchun va brauzer uchun
+    app_url: str
+    bot_url: str
+    expires_in: int
+
+
+class TelegramCheckIn(BaseModel):
+    code: str = Field(min_length=10, max_length=64)
+
+
+class TelegramCheckOut(BaseModel):
+    # pending: mijoz hali botda raqamini yubormadi; verified: token va customer keladi
+    status: Literal["pending", "verified"]
+    token: str | None = None
+    customer: CustomerOut | None = None
 
 
 class CustomerUpdate(BaseModel):

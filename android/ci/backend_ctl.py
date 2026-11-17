@@ -5,6 +5,7 @@
     backend_ctl.py status latest accepted     oxirgi buyurtmani keyingi holatga o'tkazadi
     backend_ctl.py status latest rejected "Sabab"
     backend_ctl.py product "Lag'mon" off      taomni "tugadi" deb belgilaydi (on: yana sotuvda)
+    backend_ctl.py verify +998901234567       oxirgi tasdiqlash so'rovida mijoz botda raqamini yubordi
 
 Kafe xodimi Telegram'da bosadigan tugmalar o'rnini bosadi. Faqat sinov bazasi bilan ishlatiladi:
 AMORA_DATABASE_URL sinov bazasini ko'rsatib turishi kerak.
@@ -22,7 +23,17 @@ from sqlalchemy import func, select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db import make_engine, make_session_factory  # noqa: E402
-from app.models import Category, Customer, Order, OrderStatus, Product, PromoCode  # noqa: E402
+from app.models import (  # noqa: E402
+    Category,
+    CustomerDevice,
+    Order,
+    OrderStatus,
+    PhoneVerification,
+    Product,
+    PromoCode,
+    VerificationStatus,
+)
+from app.services import verify  # noqa: E402
 from app.services.orders import set_status_by_staff  # noqa: E402
 from app.services.shop import get_shop  # noqa: E402
 
@@ -153,9 +164,39 @@ async def push_token() -> None:
     """Ilova Firebase manzilini serverga yubordimi (oxirgi ro'yxatdan o'tgan mijoz)."""
     engine = make_engine(guard())
     async with make_session_factory(engine)() as session:
-        token = await session.scalar(select(Customer.fcm_token).order_by(Customer.id.desc()).limit(1))
+        token = await session.scalar(
+            select(CustomerDevice.fcm_token).order_by(CustomerDevice.id.desc()).limit(1)
+        )
     await engine.dispose()
     print(f"Firebase manzili: {'bor' if token else 'yo`q'}")
+
+
+# Sinovdagi "mijoz"ning Telegram hisobi
+TEST_TELEGRAM_ID = 7_000_001
+
+
+async def confirm_latest(phone: str) -> None:
+    """Mijoz Telegram'da "Start" va "📱 Raqamni yuborish" ni bosgandek: emulyatorda Telegram yo'q."""
+    engine = make_engine(guard())
+    factory = make_session_factory(engine)
+    async with factory() as session:
+        verification = await session.scalar(
+            select(PhoneVerification)
+            .where(PhoneVerification.status == VerificationStatus.PENDING.value)
+            .order_by(PhoneVerification.id.desc())
+            .limit(1)
+        )
+        if verification is None:
+            raise SystemExit("Tasdiqlash so'rovi yo'q: ilova kod so'ramagan")
+        verification.telegram_user_id = TEST_TELEGRAM_ID
+        verification.telegram_name = "Sinov"
+        await session.commit()
+    async with factory() as session:
+        result, confirmed = await verify.confirm_contact(session, TEST_TELEGRAM_ID, phone)
+    await engine.dispose()
+    if result != verify.ContactResult.OK:
+        raise SystemExit(f"Tasdiqlanmadi: {result}")
+    print(f"Raqam tasdiqlandi: {confirmed}")
 
 
 def main() -> None:
@@ -164,6 +205,8 @@ def main() -> None:
         asyncio.run(prepare())
     elif args[:1] == ["product"] and len(args) == 3 and args[2] in ("on", "off"):
         asyncio.run(set_product(args[1], args[2] == "on"))
+    elif args[:1] == ["verify"] and len(args) == 2:
+        asyncio.run(confirm_latest(args[1]))
     elif args[:1] == ["push-token"]:
         asyncio.run(push_token())
     elif args[:1] == ["status"] and len(args) >= 3:

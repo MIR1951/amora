@@ -3,8 +3,8 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.models import Customer, Product, ShopSettings
-from tests.conftest import NEAR, register
+from app.models import Customer, CustomerDevice, Product, ShopSettings
+from tests.conftest import NEAR, register, register_unverified
 
 
 async def update_shop(session_factory, **values):
@@ -122,9 +122,9 @@ async def test_token_is_stored_hashed(client, session_factory):
     response = await client.post("/auth/register", json={"name": "Ali", "phone": "901234567"})
     token = response.json()["token"]
     async with session_factory() as session:
-        customer = await session.scalar(select(Customer))
-    assert customer.token_hash != token
-    assert token not in customer.token_hash
+        device = await session.scalar(select(CustomerDevice))
+    assert device.token_hash != token
+    assert token not in device.token_hash
 
 
 async def test_auth_required(client, seed):
@@ -136,12 +136,30 @@ async def test_auth_required(client, seed):
     assert bad.status_code == 401
 
 
-async def test_update_profile(client, auth):
+async def test_update_profile(client):
+    # Eski ilova: raqam tasdiqlanmagan, uni o'zgartirish mumkin
+    auth = await register_unverified(client)
     response = await client.patch(
         "/me", headers=auth, json={"name": "Vali", "phone": "93 111 22 33", "fcm_token": "abc"}
     )
     assert response.status_code == 200
-    assert response.json() == {"id": response.json()["id"], "name": "Vali", "phone": "+998931112233"}
+    assert response.json() == {
+        "id": response.json()["id"],
+        "name": "Vali",
+        "phone": "+998931112233",
+        "phone_verified": False,
+    }
+
+
+async def test_verified_phone_cannot_be_changed_by_hand(client, auth):
+    response = await client.patch("/me", headers=auth, json={"name": "Vali", "phone": "93 111 22 33"})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "phone_locked"
+    me = (await client.get("/me", headers=auth)).json()
+    assert me["phone"] == "+998901234567" and me["phone_verified"] is True
+    # Ismni o'zgartirish mumkin
+    response = await client.patch("/me", headers=auth, json={"name": "Vali"})
+    assert response.json()["name"] == "Vali"
 
 
 # ---------- Savatni hisoblash ----------
@@ -357,13 +375,21 @@ async def test_active_order_limit(client, seed, auth):
     assert (await client.post("/orders", headers=auth, json=order_body(seed))).status_code == 201
 
 
-async def test_order_can_use_other_contact(client, seed, auth):
+async def test_order_uses_verified_phone(client, seed, auth):
+    # Ism boshqacha bo'lishi mumkin (masalan onasiga buyurtma), raqam esa tasdiqlangan raqam
     response = await client.post(
         "/orders", headers=auth, json=order_body(seed, name="Onam", phone="99 888 77 66")
     )
     assert response.status_code == 201
     assert response.json()["customer_name"] == "Onam"
-    assert response.json()["phone"] == "+998998887766"
+    assert response.json()["phone"] == "+998901234567"
+
+
+async def test_unverified_customer_cannot_order(client, seed):
+    old_app = await register_unverified(client)
+    response = await client.post("/orders", headers=old_app, json=order_body(seed))
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "phone_not_verified"
 
 
 async def test_blocked_phone_cannot_order(client, seed, auth, session_factory):
@@ -387,8 +413,8 @@ async def test_blocked_phone_cannot_order(client, seed, auth, session_factory):
 
 async def test_orders_are_private(client, seed, auth):
     order = (await client.post("/orders", headers=auth, json=order_body(seed))).json()
-    # Xuddi shu raqamni yozgan boshqa qurilma ham buyurtmani ko'ra olmaydi
-    stranger = await register(client, name="Begona", phone="90 123 45 67")
+    # Xuddi shu raqamni yozgan, lekin tasdiqlamagan boshqa qurilma buyurtmani ko'ra olmaydi
+    stranger = await register_unverified(client, name="Begona", phone="90 123 45 67")
     assert (await client.get(f"/orders/{order['id']}", headers=stranger)).status_code == 404
     assert (await client.post(f"/orders/{order['id']}/cancel", headers=stranger)).status_code == 404
     assert (await client.get("/orders", headers=stranger)).json()["orders"] == []

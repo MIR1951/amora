@@ -1,11 +1,17 @@
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.models import Category, Order, OrderStatus, Product, ShopSettings, Staff
 from app.services.reports import PERIODS
 from app.telegram.texts import (
     REJECT_REASONS,
+    VERIFY_SHARE_BUTTON,
     google_maps_url,
     product_button_label,
     yandex_maps_url,
@@ -364,4 +370,16 @@ def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
             [_btn("📣 Yuborish", AdminCb(action="bc_send"))],
             [_btn("❌ Bekor qilish", AdminCb(action="promo"))],
         ]
+    )
+
+
+# ---------- Raqamni tasdiqlash ----------
+
+
+def share_contact_keyboard() -> ReplyKeyboardMarkup:
+    """Telegram bu tugma bilan faqat hisob egasining o'z raqamini yuboradi."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=VERIFY_SHARE_BUTTON, request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
     )
