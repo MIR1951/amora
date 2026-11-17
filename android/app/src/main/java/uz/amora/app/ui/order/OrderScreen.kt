@@ -61,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -642,6 +643,26 @@ private fun ItemsCard(order: Order) {
                 Text("Bepul", style = MaterialTheme.typography.titleSmall, color = scheme.success)
             } else {
                 Text(formatSum(order.deliveryFee), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            }
+        }
+        if (order.discount > 0) {
+            RowDivider(inset = 16.dp)
+            MiniRow {
+                Text(
+                    text = order.promoCode?.let { "Chegirma · $it" } ?: "Chegirma",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "−${formatSum(order.discount)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = scheme.success,
+                    maxLines = 1,
+                )
             }
         }
         RowDivider(inset = 16.dp)

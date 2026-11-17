@@ -25,12 +25,20 @@ data class CartUiState(
     val quoteLoading: Boolean = false,
     val quoteError: String? = null,
     val comment: String = "",
+    // Mijoz yozayotgan promokod va "Qo'llash" bosilgandan keyin serverga yuborilgani
+    val promoInput: String = "",
+    val appliedPromo: String? = null,
     val submitting: Boolean = false,
     val submitError: String? = null,
     val createdOrderId: Int? = null,
 )
 
-private data class QuoteRequest(val items: Map<Int, Int>, val address: Address?, val tick: Int)
+private data class QuoteRequest(
+    val items: Map<Int, Int>,
+    val address: Address?,
+    val promo: String?,
+    val tick: Int,
+)
 
 class CartViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(CartUiState())
@@ -38,6 +46,7 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
 
     // Qiymati o'zgarsa, summa serverdan qayta so'raladi
     private val refreshTick = MutableStateFlow(0)
+    private val appliedPromo = MutableStateFlow<String?>(null)
 
     // Bitta buyurtma uchun bitta kalit: internet uzilib qayta yuborilsa, buyurtma ikkilanmaydi.
     // Savat, manzil yoki izoh o'zgarsa, bu endi boshqa buyurtma: kalit ham yangilanadi.
@@ -46,8 +55,13 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            combine(container.cart.items, container.session.address, refreshTick) { items, address, tick ->
-                QuoteRequest(items, address, tick)
+            combine(
+                container.cart.items,
+                container.session.address,
+                appliedPromo,
+                refreshTick,
+            ) { items, address, promo, tick ->
+                QuoteRequest(items, address, promo, tick)
             }.collectLatest { request ->
                 if (request.items.isEmpty()) {
                     _state.update { it.copy(quote = null, quoteLoading = false, quoteError = null) }
@@ -59,11 +73,15 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
         // Savat ochiq turganda menyu yoki kafe sozlamalari o'zgarsa (taom tugadi, narx o'zgardi,
-        // kafe yopildi), summa va ogohlantirishlar serverdan qayta so'raladi
+        // kafe yopildi, aksiya o'zgardi), summa va ogohlantirishlar serverdan qayta so'raladi
         viewModelScope.launch {
             container.realtime.events.collect { event ->
                 if (event !is LiveEvent.OrderChanged) refreshQuote()
             }
+        }
+        // Ro'yxatdan o'tgach (yoki raqam o'zgargach) birinchi buyurtma chegirmasi qayta tekshiriladi
+        viewModelScope.launch {
+            container.session.profile.collect { refreshQuote() }
         }
     }
 
@@ -73,6 +91,7 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 request.items.toCartItems(),
                 request.address?.latitude,
                 request.address?.longitude,
+                request.promo,
             )
             _state.update { it.copy(quote = quote, quoteLoading = false, quoteError = null) }
         } catch (e: ApiException) {
@@ -82,6 +101,25 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshQuote() {
         refreshTick.update { it + 1 }
+    }
+
+    fun setPromoInput(value: String) {
+        val cleaned = value.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .uppercase()
+            .take(MAX_PROMO_LENGTH)
+        _state.update { it.copy(promoInput = cleaned) }
+    }
+
+    fun applyPromo() {
+        val code = _state.value.promoInput.trim()
+        if (code.isEmpty()) return
+        _state.update { it.copy(appliedPromo = code) }
+        appliedPromo.value = code
+    }
+
+    fun removePromo() {
+        _state.update { it.copy(appliedPromo = null, promoInput = "") }
+        appliedPromo.value = null
     }
 
     fun setComment(comment: String) {
@@ -106,7 +144,9 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
         if (items.isEmpty() || address == null || profile == null || quote == null) return
 
         val comment = current.comment.trim()
-        val fingerprint = "$items|$address|$comment|${profile.phone}"
+        // Ishlamagan kod buyurtmaga yuborilmaydi: mijoz sababini ko'rgan, summa usiz hisoblangan
+        val promo = current.appliedPromo?.takeIf { quote.promoError == null }
+        val fingerprint = "$items|$address|$comment|${profile.phone}|$promo"
         if (fingerprint != orderFingerprint) {
             orderFingerprint = fingerprint
             clientOrderId = UUID.randomUUID().toString()
@@ -121,6 +161,7 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
             phone = profile.phone,
             clientOrderId = clientOrderId,
             expectedTotal = quote.total,
+            promoCode = promo,
         )
 
         _state.update { it.copy(submitting = true, submitError = null) }
@@ -132,7 +173,16 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 // Yangi buyurtma darhol "faol buyurtmalar"ga qo'shiladi: bosh sahifadagi belgi va
                 // bildirishnomalar shunga tayanadi
                 container.live.orderPlaced()
-                _state.update { it.copy(submitting = false, comment = "", createdOrderId = created.id) }
+                appliedPromo.value = null
+                _state.update {
+                    it.copy(
+                        submitting = false,
+                        comment = "",
+                        promoInput = "",
+                        appliedPromo = null,
+                        createdOrderId = created.id,
+                    )
+                }
             } catch (e: ApiException) {
                 _state.update { it.copy(submitting = false, submitError = e.message) }
                 // Narx yoki taom holati o'zgargan bo'lishi mumkin: summani qayta so'raymiz
@@ -144,5 +194,6 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
     private companion object {
         const val QUOTE_DEBOUNCE_MS = 300L
         const val MAX_COMMENT_LENGTH = 500
+        const val MAX_PROMO_LENGTH = 20
     }
 }

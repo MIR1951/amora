@@ -608,14 +608,36 @@ private fun Modifier.bleed(horizontal: Dp): Modifier = layout { measurable, cons
     }
 }
 
-/** Banner sarlavhasi va izohi: yetkazish shartlari serverdan olinadi. */
+/**
+ * Banner sarlavhasi va izohi. Kafe botda o'z matnini (aksiya) yozgan bo'lsa o'sha,
+ * aks holda yetkazish shartlari ko'rsatiladi.
+ */
 private fun heroLines(shop: Shop?): Pair<String, String> {
     val warm = "Issiq holda, eshigingizgacha"
     if (shop == null) return "Mazali taomlar\nuyingizgacha" to warm
-    if (shop.deliveryFee <= 0) return "Yetkazish\nbepul" to warm
     val freeFrom = shop.freeDeliveryFrom
-    val sub = if (freeFrom != null) "${formatSum(freeFrom)}dan yetkazish bepul" else warm
-    return "Yetkazish\n${formatSum(shop.deliveryFee)}" to sub
+    val (defaultTitle, defaultSub) = when {
+        shop.deliveryFee <= 0 -> "Yetkazish\nbepul" to warm
+        freeFrom != null -> "Yetkazish\n${formatSum(shop.deliveryFee)}" to "${formatSum(freeFrom)}dan yetkazish bepul"
+        else -> "Yetkazish\n${formatSum(shop.deliveryFee)}" to warm
+    }
+    val title = shop.bannerTitle?.trim()?.takeIf { it.isNotEmpty() } ?: defaultTitle
+    val sub = shop.bannerText?.trim()?.takeIf { it.isNotEmpty() } ?: defaultSub
+    return title to sub
+}
+
+/** Uzun sarlavha ikki qatorga sig'ishi uchun harf kichrayadi. */
+private fun heroTitleSize(title: String): Int {
+    val lines = title.lines()
+    val longest = lines.maxOf { it.length }
+    // Bitta qatorli uzun matn ikki qatorga bo'linadi
+    val perLine = if (lines.size == 1 && longest > 13) (longest + 1) / 2 + 3 else longest
+    return when {
+        perLine <= 13 -> 29
+        perLine <= 16 -> 24
+        perLine <= 20 -> 20
+        else -> 17
+    }
 }
 
 /** Ko'mir rangli banner: kafe nomi, yetkazish sharti va o'ngda pitsa rasmi. */
@@ -647,11 +669,16 @@ private fun ShopHero(shop: Shop?) {
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(6.dp))
+            val titleSize = heroTitleSize(title)
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineLarge.copy(fontSize = 29.sp, lineHeight = 30.sp),
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontSize = titleSize.sp,
+                    lineHeight = (titleSize + 1).sp,
+                ),
                 color = Color.White,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -666,7 +693,7 @@ private fun ShopHero(shop: Shop?) {
                     text = sub,
                     style = MaterialTheme.typography.bodySmall,
                     color = scheme.onInkMuted,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
