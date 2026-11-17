@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.gms.google-services")
 }
 
 val apiBaseUrl = providers.gradleProperty("amora.apiBaseUrl").get().trimEnd('/')
@@ -98,6 +99,10 @@ dependencies {
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     // Shisha (glass) panellar ortidagi kontentni xiralashtirish uchun
     implementation("dev.chrisbanes.haze:haze:1.1.1")
+
+    // Push-bildirishnomalar: ilova butunlay yopiq bo'lsa ham buyurtma holati va aksiyalar haqida
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     testImplementation("junit:junit:4.13.2")
 }

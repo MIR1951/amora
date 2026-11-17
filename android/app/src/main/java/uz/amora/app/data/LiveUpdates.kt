@@ -96,6 +96,17 @@ class LiveUpdates(
         if (visibleOrderId == orderId) visibleOrderId = null
     }
 
+    /**
+     * Firebase orqali kelgan holat (ilova yopiq yoki orqa fonda bo'lsa ham keladi). Jonli ulanish
+     * orqali kelgan xuddi shu xabar bilan ikkilanmaydi: ikkalasi bir joydan o'tadi.
+     */
+    fun onPush(event: LiveEvent.OrderChanged) {
+        scope.launch {
+            notify(event)
+            refreshActiveOrders()
+        }
+    }
+
     /** Mijoz hozirgina buyurtma berdi: u darhol faol buyurtmalar qatoriga qo'shiladi. */
     fun orderPlaced() {
         scope.launch { refreshActiveOrders() }

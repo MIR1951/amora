@@ -28,12 +28,20 @@ class Settings(BaseSettings):
     max_active_orders: int = 2
     register_limit_per_hour: int = 10
 
+    # Firebase service account kaliti (JSON). Yozilmasa push-bildirishnomalar o'chiq
+    firebase_credentials: Path | None = None
+
     debug: bool = False
 
     @field_validator("public_base_url")
     @classmethod
     def _strip_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("firebase_credentials", mode="before")
+    @classmethod
+    def _empty_path_to_none(cls, value):
+        return None if value == "" else value
 
     @field_validator("orders_chat_id", mode="before")
     @classmethod

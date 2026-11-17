@@ -16,6 +16,7 @@ import uz.amora.app.data.ApiClient
 import uz.amora.app.data.CartStore
 import uz.amora.app.data.Catalog
 import uz.amora.app.data.LiveUpdates
+import uz.amora.app.data.PushTokens
 import uz.amora.app.data.Realtime
 import uz.amora.app.data.SessionStore
 import uz.amora.app.notify.OrderNotifier
@@ -36,6 +37,9 @@ class AppContainer(context: Context) {
     val activeOrders = ActiveOrders(api, session)
     val notifier = OrderNotifier(context)
     val live = LiveUpdates(realtime, catalog, activeOrders, notifier, session, appScope)
+
+    // Firebase: ilova yopiq bo'lsa ham bildirishnoma
+    val push = PushTokens(api, session, appScope)
 }
 
 class AmoraApp : Application() {
@@ -46,11 +50,15 @@ class AmoraApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         container.notifier.createChannel()
+        container.push.start()
         configureMap()
         // Ilova ekranda turganda server bilan jonli ulanish ushlab turiladi
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
-                override fun onStart(owner: LifecycleOwner) = container.live.onForeground()
+                override fun onStart(owner: LifecycleOwner) {
+                    container.live.onForeground()
+                    container.push.retry()
+                }
 
                 override fun onStop(owner: LifecycleOwner) = container.live.onBackground()
             },

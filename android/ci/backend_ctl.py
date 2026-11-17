@@ -22,7 +22,7 @@ from sqlalchemy import func, select  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db import make_engine, make_session_factory  # noqa: E402
-from app.models import Category, Order, OrderStatus, Product, PromoCode  # noqa: E402
+from app.models import Category, Customer, Order, OrderStatus, Product, PromoCode  # noqa: E402
 from app.services.orders import set_status_by_staff  # noqa: E402
 from app.services.shop import get_shop  # noqa: E402
 
@@ -149,12 +149,23 @@ async def set_product(name: str, available: bool) -> None:
     await engine.dispose()
 
 
+async def push_token() -> None:
+    """Ilova Firebase manzilini serverga yubordimi (oxirgi ro'yxatdan o'tgan mijoz)."""
+    engine = make_engine(guard())
+    async with make_session_factory(engine)() as session:
+        token = await session.scalar(select(Customer.fcm_token).order_by(Customer.id.desc()).limit(1))
+    await engine.dispose()
+    print(f"Firebase manzili: {'bor' if token else 'yo`q'}")
+
+
 def main() -> None:
     args = sys.argv[1:]
     if args[:1] == ["prepare"]:
         asyncio.run(prepare())
     elif args[:1] == ["product"] and len(args) == 3 and args[2] in ("on", "off"):
         asyncio.run(set_product(args[1], args[2] == "on"))
+    elif args[:1] == ["push-token"]:
+        asyncio.run(push_token())
     elif args[:1] == ["status"] and len(args) >= 3:
         asyncio.run(set_status(args[1], args[2], args[3] if len(args) > 3 else None))
     else:

@@ -297,6 +297,7 @@ def promo_menu_keyboard(codes: list) -> InlineKeyboardMarkup:
         mark = "🟢" if promo.is_active else "⚪️"
         builder.row(_btn(f"{mark} {promo.code}", AdminCb(action="pc", id=promo.id)))
     builder.row(_btn("➕ Promokod qo'shish", AdminCb(action="pc_add")))
+    builder.row(_btn("📣 Mijozlarga xabar yuborish", AdminCb(action="bc")))
     builder.row(BACK_TO_MAIN)
     return builder.as_markup()
 
@@ -352,6 +353,15 @@ def promo_audience_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [_btn("👥 Hamma mijozlar", AdminCb(action="pc_new", value="0"))],
             [_btn("🆕 Faqat birinchi buyurtma", AdminCb(action="pc_new", value="1"))],
+            [_btn("❌ Bekor qilish", AdminCb(action="promo"))],
+        ]
+    )
+
+
+def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_btn("📣 Yuborish", AdminCb(action="bc_send"))],
             [_btn("❌ Bekor qilish", AdminCb(action="promo"))],
         ]
     )

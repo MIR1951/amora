@@ -72,6 +72,14 @@ class ApiClient(
         auth = true,
     )
 
+    suspend fun updatePushToken(token: String): Customer = call(
+        "PATCH",
+        "/me",
+        Customer.serializer(),
+        body = json.encodeToString(PushTokenUpdate.serializer(), PushTokenUpdate(token)),
+        auth = true,
+    )
+
     // ---------- Buyurtma ----------
 
     // Token bo'lsa yuboriladi: server mijozning oldingi buyurtmalarini ko'rib, birinchi buyurtma

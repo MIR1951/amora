@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request
+from sqlalchemy import update
 
 from app.api.deps import CfgDep, CustomerDep, SessionDep
 from app.errors import ApiError
@@ -46,6 +47,14 @@ async def update_me(data: CustomerUpdate, customer: CustomerDep, session: Sessio
         if await is_phone_blocked(session, data.phone):
             customer.is_blocked = True
     if "fcm_token" in data.model_fields_set:
-        customer.fcm_token = data.fcm_token or None
+        token = data.fcm_token or None
+        if token is not None:
+            # Telefonda boshqa raqam bilan qayta ro'yxatdan o'tilgan: eski mijozga xabar ketmasin
+            await session.execute(
+                update(Customer)
+                .where(Customer.fcm_token == token, Customer.id != customer.id)
+                .values(fcm_token=None)
+            )
+        customer.fcm_token = token
     await session.commit()
     return customer
