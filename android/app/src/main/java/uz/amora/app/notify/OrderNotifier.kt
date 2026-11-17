@@ -65,7 +65,44 @@ class OrderNotifier(context: Context) {
         ).apply {
             description = "Buyurtma qabul qilingani, kuryer yo'lga chiqqani va yetkazilgani haqida"
         }
-        context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        val promo = NotificationChannel(
+            CHANNEL_PROMO,
+            "Aksiyalar va yangiliklar",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Kafedan chegirmalar va yangi taomlar haqida xabarlar"
+        }
+        context.getSystemService(NotificationManager::class.java)?.let { manager ->
+            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(promo)
+        }
+    }
+
+    /** Kafedan aksiya xabari (ilova ochiq paytda keldi: tizim o'zi ko'rsatmaydi). */
+    fun showPromo(title: String, text: String) {
+        if (!isEnabled()) return
+        val open = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(
+            context,
+            PROMO_REQUEST,
+            open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_PROMO)
+            .setSmallIcon(R.drawable.ic_bell)
+            .setColor(ContextCompat.getColor(context, R.color.brand))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+        try {
+            manager.notify(PROMO_NOTIFICATION_ID, notification)
+        } catch (e: SecurityException) {
+            // Ruxsat shu lahzada qaytarib olingan
+        }
     }
 
     /** Telefon hozir bildirishnoma ko'rsatishga ruxsat beradimi. */
@@ -116,6 +153,10 @@ class OrderNotifier(context: Context) {
 
     companion object {
         const val CHANNEL_ORDERS = "orders"
+        const val CHANNEL_PROMO = "promo"
+        // Buyurtma bildirishnomalari buyurtma raqamini ishlatadi: aksiya manfiy raqamda turadi
+        private const val PROMO_NOTIFICATION_ID = -1
+        private const val PROMO_REQUEST = -1
         const val EXTRA_ORDER_ID = "order_id"
 
         /** Telefon sozlamalaridagi shu ilovaning bildirishnomalar sahifasi. */

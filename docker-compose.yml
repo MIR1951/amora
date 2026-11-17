@@ -41,9 +41,12 @@ services:
     environment:
       AMORA_DATABASE_URL: postgresql+asyncpg://amora:${POSTGRES_PASSWORD}@db:5432/amora
       AMORA_MEDIA_DIR: /srv/amora/media
+      # Firebase kaliti: serverda ~/amora/secrets/firebase.json. Fayl bo'lmasa push o'chiq
+      AMORA_FIREBASE_CREDENTIALS: /srv/amora/secrets/firebase.json
     volumes:
       # Bot saqlagan taom rasmlarini api shu yerdan tarqatadi
       - media:/srv/amora/media
+      - ./secrets:/srv/amora/secrets:ro
     command: ["python", "-m", "app.bot"]
 
 volumes:

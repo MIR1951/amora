@@ -212,5 +212,8 @@ def get_dispatcher(cfg, session_factory) -> Dispatcher:
         _dispatcher = build_dispatcher(cfg, session_factory)
     _dispatcher["cfg"] = cfg
     _dispatcher["session_factory"] = session_factory
+    from app.services.push import PushSender
+
+    _dispatcher["push"] = PushSender(None)
     _dispatcher.fsm.storage = MemoryStorage()
     return _dispatcher

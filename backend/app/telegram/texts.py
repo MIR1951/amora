@@ -521,3 +521,39 @@ PROMO_WIZARD = {
     ),
     "audience": "Kim ishlata oladi?",
 }
+
+
+# ---------- Mijozlarga xabar ----------
+
+BROADCAST_TITLE_MAX = 50
+BROADCAST_TEXT_MAX = 300
+
+BROADCAST_TITLE_PROMPT = (
+    "📣 <b>Mijozlarga xabar</b>\n\n"
+    "Ilovani o'rnatgan hamma telefonga bildirishnoma bo'lib boradi, ilova yopiq bo'lsa ham. "
+    "Bepul.\n\n"
+    f"Avval sarlavhani yozing (ko'pi bilan {BROADCAST_TITLE_MAX} ta harf). Masalan:\n"
+    "<i>Bugun hamma pitsalarga −20%</i>"
+)
+
+BROADCAST_TEXT_PROMPT = (
+    f"Endi xabar matnini yozing (ko'pi bilan {BROADCAST_TEXT_MAX} ta harf). Masalan:\n"
+    "<i>Faqat bugun soat 22:00 gacha. Promokod: PITSA20</i>"
+)
+
+
+def broadcast_preview(title: str, text: str, known: int) -> str:
+    return "\n".join(
+        [
+            "📣 <b>Xabar shunday ko'rinadi:</b>",
+            "",
+            f"<b>{escape(title)}</b>",
+            escape(text),
+            "",
+            f"Bildirishnomasi yoqilgan, ro'yxatdan o'tgan mijozlar: {known} ta. "
+            "Ilovani o'rnatib, hali buyurtma bermaganlarga ham boradi.",
+            "",
+            "Yuborilgan xabarni qaytarib bo'lmaydi. Juda tez-tez yubormang: mijozlar "
+            "bildirishnomani o'chirib qo'yishi mumkin.",
+        ]
+    )

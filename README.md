@@ -122,6 +122,8 @@ Yangilash:
 git pull && docker compose up -d --build
 ```
 
+**Push-bildirishnomalar (Firebase).** Firebase konsolidagi *Project settings → Service accounts → Generate new private key* faylini serverga `~/amora/secrets/firebase.json` qilib qo'ying (bu papka GitHub'ga yuklanmaydi). Bot uni o'zi topadi. Fayl yo'q bo'lsa push o'chiq, qolgan hamma narsa ishlaydi. Tekshirish: `docker compose logs bot | grep -i firebase`. "o'qilmadi" chiqsa, `chmod 644 ~/amora/secrets/firebase.json` qilib, `docker compose up -d` ni qayta ishga tushiring. Ilova tomoni `android/app/google-services.json` dan sozlanadi (u maxfiy emas).
+
 ## Kompyuterda ishga tushirish va testlar
 
 ```bash
@@ -156,7 +158,7 @@ Qanday ishlaydi:
 - Mijoz menyuni ro'yxatdan o'tmasdan ko'radi. Birinchi buyurtma paytida ism va telefon so'raladi, server bergan kalit telefonda saqlanadi.
 - Xarita OpenStreetMap: kalit ham, to'lov ham kerak emas. Joylashuv Google xizmatlarisiz, telefonning o'z GPS'i orqali aniqlanadi.
 - Ilova ochiq turganda server bilan jonli ulanish ushlab turiladi (`data/Realtime.kt`, `data/LiveUpdates.kt`): menyu, kafe holati, faol buyurtmalar va ochiq turgan buyurtma ekrani serverdagi o'zgarishdan keyin o'zi yangilanadi. Ulanish uzilsa, ilova o'zi qayta ulanadi va shu orada avvalgidek vaqti-vaqti bilan so'rab turadi (buyurtma holati har 7 soniyada).
-- Buyurtma holati o'zgarganda bildirishnoma chiqadi (`notify/OrderNotifier.kt`), bosilsa o'sha buyurtma ochiladi. Ruxsat birinchi buyurtmadan keyin so'raladi, keyin profil sahifasidagi "Bildirishnomalar" qatoridan boshqariladi. Bildirishnoma jonli ulanishga tayanadi: ilova ochiq yoki yaqinda orqa fonga o'tgan bo'lsa keladi. Ilova butunlay yopiq paytda ham kelishi uchun Firebase (FCM) kerak, u hali ulanmagan.
+- Buyurtma holati o'zgarganda bildirishnoma chiqadi (`notify/OrderNotifier.kt`), bosilsa o'sha buyurtma ochiladi. Ruxsat birinchi buyurtmadan keyin so'raladi, keyin profil sahifasidagi "Bildirishnomalar" qatoridan boshqariladi. Ilova ochiq paytda bildirishnoma jonli ulanishdan keladi, yopiq paytda esa Firebase (FCM) orqali. Ikkala yo'l bitta joydan o'tadi, shuning uchun bitta o'zgarish uchun bitta bildirishnoma chiqadi. Kafe botdagi "📣 Mijozlarga xabar yuborish" orqali ilovani o'rnatgan hamma telefonga aksiya xabarini yuboradi (bepul).
 - Har bir buyurtmaga takrorlanmas raqam biriktiriladi: internet uzilib, buyurtma qayta yuborilsa ham u ikkilanmaydi.
 
 Server manzili bitta joyda turadi: `android/gradle.properties` dagi `amora.apiBaseUrl`. Domen o'zgarsa faqat shu qator almashtiriladi.

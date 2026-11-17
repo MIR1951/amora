@@ -54,6 +54,15 @@ class SessionStore(context: Context) {
         get() = prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
         set(value) = prefs.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, value).apply()
 
+    /** Firebase bergan qurilma manzili va u qaysi kirish kaliti bilan serverga yuborilgani. */
+    var pushToken: String?
+        get() = prefs.getString(KEY_PUSH_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_PUSH_TOKEN, value).apply()
+
+    var pushTokenSentWith: String?
+        get() = prefs.getString(KEY_PUSH_SENT_WITH, null)
+        set(value) = prefs.edit().putString(KEY_PUSH_SENT_WITH, value).apply()
+
     fun saveProfile(profile: Profile) {
         prefs.edit()
             .putString(KEY_NAME, profile.name)
@@ -92,6 +101,8 @@ class SessionStore(context: Context) {
         const val KEY_LONGITUDE = "longitude"
         const val KEY_NOTE = "address_note"
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
+        const val KEY_PUSH_TOKEN = "push_token"
+        const val KEY_PUSH_SENT_WITH = "push_token_sent_with"
     }
 }
 

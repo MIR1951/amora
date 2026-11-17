@@ -16,8 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db import utcnow
-from app.models import Order, OrderStatus, PromoCode
+from app.models import Customer, Order, OrderStatus, PromoCode
 from app.services import promos
+from app.services.push import PushError, PushSender, broadcast
 from app.services.shop import get_shop
 from app.telegram import keyboards as kb
 from app.telegram import texts
@@ -40,6 +41,12 @@ _VOID = (OrderStatus.CANCELLED.value, OrderStatus.REJECTED.value)
 class PromoInput(StatesGroup):
     banner = State()
     auto = State()
+
+
+class Broadcast(StatesGroup):
+    title = State()
+    text = State()
+    confirm = State()
 
 
 class NewPromo(StatesGroup):
@@ -419,3 +426,77 @@ async def cb_add_finish(
 @router.message(NewPromo.audience, NOT_COMMAND)
 async def msg_add_audience(message: Message):
     await message.answer("Pastdagi tugmalardan birini bosing.", reply_markup=kb.promo_audience_keyboard())
+
+
+# ---------- Mijozlarga xabar (push) ----------
+
+
+@router.callback_query(AdminCb.filter(F.action == "bc"))
+async def cb_broadcast(callback: CallbackQuery, state: FSMContext, push: PushSender):
+    if not push.enabled:
+        await callback.answer(
+            "Bildirishnomalar hali sozlanmagan: serverda Firebase kaliti yo'q", show_alert=True
+        )
+        return
+    await state.clear()
+    await state.set_state(Broadcast.title)
+    await show(callback, texts.BROADCAST_TITLE_PROMPT, CANCEL)
+
+
+@router.message(Broadcast.title, NOT_COMMAND)
+async def msg_broadcast_title(message: Message, state: FSMContext):
+    title = clean_text(message)
+    if not title:
+        await message.answer("Sarlavhani matn bilan yozing.")
+        return
+    if len(title) > texts.BROADCAST_TITLE_MAX:
+        await message.answer(f"Juda uzun: ko'pi bilan {texts.BROADCAST_TITLE_MAX} ta harf bo'lsin.")
+        return
+    await state.update_data(title=title)
+    await state.set_state(Broadcast.text)
+    await message.answer(texts.BROADCAST_TEXT_PROMPT, reply_markup=CANCEL)
+
+
+@router.message(Broadcast.text, NOT_COMMAND)
+async def msg_broadcast_text(message: Message, state: FSMContext, session_factory: SessionFactory):
+    text = " ".join((message.text or "").split())
+    if not text:
+        await message.answer("Xabar matnini yozing.")
+        return
+    if len(text) > texts.BROADCAST_TEXT_MAX:
+        await message.answer(f"Juda uzun: ko'pi bilan {texts.BROADCAST_TEXT_MAX} ta harf bo'lsin.")
+        return
+    await state.update_data(text=text)
+    await state.set_state(Broadcast.confirm)
+    async with session_factory() as session:
+        known = await session.scalar(
+            select(func.count()).select_from(Customer).where(Customer.fcm_token.is_not(None))
+        )
+    title = (await state.get_data())["title"]
+    await message.answer(
+        texts.broadcast_preview(title, text, known), reply_markup=kb.broadcast_confirm_keyboard()
+    )
+
+
+@router.callback_query(AdminCb.filter(F.action == "bc_send"), Broadcast.confirm)
+async def cb_broadcast_send(
+    callback: CallbackQuery, state: FSMContext, push: PushSender, session_factory: SessionFactory
+):
+    data = await state.get_data()
+    await state.clear()  # ikki marta bosilsa ikki marta ketmasin
+    try:
+        await broadcast(push, data["title"], data["text"])
+    except PushError as error:
+        log.warning("Xabar yuborilmadi: %s", error)
+        async with session_factory() as session:
+            await show_promo_menu(callback, session, "Yuborilmadi, birozdan keyin qayta urining")
+        return
+    log.info("Mijozlarga xabar yuborildi: %r (%s)", data["title"], callback.from_user.id)
+    async with session_factory() as session:
+        await show_promo_menu(callback, session, "📣 Xabar yuborildi")
+
+
+@router.callback_query(AdminCb.filter(F.action == "bc_send"))
+async def cb_broadcast_stale(callback: CallbackQuery, session_factory: SessionFactory):
+    async with session_factory() as session:
+        await show_promo_menu(callback, session, "Bu xabar allaqachon yuborilgan yoki bekor qilingan")

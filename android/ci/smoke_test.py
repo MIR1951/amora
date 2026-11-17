@@ -421,6 +421,10 @@ def scenario_full():
     # 1-buyurtma: kafe qabul qiladi, kuryer yo'lga chiqadi, yetkazadi
     place_order()
     shot("09-order-new")
+    # Ilova Firebase manzilini serverga yubordimi. Emulyatorda Google xizmatlari bo'lmasligi
+    # mumkin: bu faqat jurnalga yoziladi, sinovni to'xtatmaydi
+    time.sleep(3)
+    backend("push-token")
     print("Buyurtma:", visible_texts(), flush=True)
 
     # Bu yerda ekran to'g'ri ko'rsatilishi tekshiriladi. Holat tez kelgani jonli ulanishni

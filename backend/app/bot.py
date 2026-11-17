@@ -20,17 +20,21 @@ from app.telegram import (
     promo_router,
     team_router,
 )
+from app.services.push import PushSender
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
 from app.telegram.watch import watch_forever
 
 log = logging.getLogger(__name__)
 
 
-def build_dispatcher(cfg: Settings, session_factory: SessionFactory) -> Dispatcher:
+def build_dispatcher(
+    cfg: Settings, session_factory: SessionFactory, push: PushSender | None = None
+) -> Dispatcher:
     dispatcher = Dispatcher(storage=MemoryStorage())
     # Bu qiymatlar handler'larga nomi bo'yicha uzatiladi
     dispatcher["cfg"] = cfg
     dispatcher["session_factory"] = session_factory
+    dispatcher["push"] = push or PushSender(None)
     dispatcher.include_router(orders_router.router)
     # Taklif havolasi /start bilan keladi: u boshqa /start'lardan oldin tekshiriladi
     dispatcher.include_router(team_router.invite_router)
@@ -128,7 +132,8 @@ async def main() -> None:
     engine = make_engine(cfg.database_url)
     session_factory = make_session_factory(engine)
     bot = make_bot(cfg.bot_token)
-    dispatcher = build_dispatcher(cfg, session_factory)
+    push = PushSender(cfg.firebase_credentials)
+    dispatcher = build_dispatcher(cfg, session_factory, push)
 
     if not cfg.admin_id_set:
         log.warning("AMORA_ADMIN_IDS bo'sh: admin bo'limiga hech kim kira olmaydi")
@@ -155,6 +160,7 @@ async def main() -> None:
         if sweeper is not None:
             sweeper.cancel()
         await bot.session.close()
+        await push.close()
         await engine.dispose()
 
 

@@ -78,6 +78,12 @@ data class CustomerUpdate(
     val phone: String? = null,
 )
 
+/** Faqat push manzilini yangilash: ism va telefonga tegilmaydi. */
+@Serializable
+data class PushTokenUpdate(
+    @SerialName("fcm_token") val fcmToken: String,
+)
+
 // ---------- Savat va buyurtma ----------
 
 @Serializable

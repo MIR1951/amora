@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .env
+# Maxfiy kalitlar (Firebase va h.k.): faqat serverda turadi
+secrets/
 media/
 .pytest_cache/
 *.sqlite3
