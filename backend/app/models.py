@@ -99,6 +99,7 @@ class Order(Base):
         UniqueConstraint("customer_id", "client_order_id", name="uq_orders_customer_client_id"),
         Index("ix_orders_customer_created", "customer_id", "created_at"),
         Index("ix_orders_status", "status"),
+        Index("ix_orders_phone", "phone"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -124,6 +125,11 @@ class Order(Base):
     # Guruhdagi xabar: bot uni holat o'zgarganda tahrirlaydi
     tg_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tg_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Shu raqamdan berilgan nechanchi buyurtma (1 = yangi mijoz). Eski buyurtmalarda bo'sh
+    customer_order_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Kechikish haqida qaysi holat uchun guruhga eslatma yuborilgan: har holatga bir marta
+    alerted_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -194,3 +200,44 @@ class ShopSettings(Base):
     close_time: Mapped[time] = mapped_column(Time, default=time(23, 0))
     # Qo'lda o'chirish: kafe band bo'lsa yoki dam olish kuni
     is_accepting_orders: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Kechikish eslatmasi: buyurtma shuncha daqiqa qabul qilinmasa yoki yo'lda tursa (0 = o'chiq)
+    alert_accept_minutes: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
+    alert_delivery_minutes: Mapped[int] = mapped_column(Integer, default=45, server_default="45")
+    # Kunlik hisobot kafe yopilganda qayerga yuboriladi: group | admins | off
+    daily_report_to: Mapped[str] = mapped_column(String(10), default="group", server_default="group")
+    # Oxirgi yuborilgan kunlik hisobot qaysi ish kuni oxiriga tegishli (ikki marta ketmasligi uchun)
+    daily_report_sent_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class StaffRole(StrEnum):
+    ADMIN = "admin"  # hamma narsa: menyu, sozlamalar, xodimlar
+    STAFF = "staff"  # taom bor/tugadi, qabulni to'xtatish, hisobot, mijoz kartasi
+
+
+class Staff(Base):
+    """Botdan qo'shilgan admin va xodimlar. Egasi (AMORA_ADMIN_IDS) bu jadvalda bo'lmaydi."""
+
+    __tablename__ = "staff"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(10))
+    added_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class StaffInvite(Base):
+    """Bir martalik taklif havolasi: t.me/<bot>?start=inv_<token>."""
+
+    __tablename__ = "staff_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True)
+    role: Mapped[str] = mapped_column(String(10))
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

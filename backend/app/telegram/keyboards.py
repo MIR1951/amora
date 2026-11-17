@@ -2,7 +2,8 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.models import Category, Order, OrderStatus, Product, ShopSettings
+from app.models import Category, Order, OrderStatus, Product, ShopSettings, Staff
+from app.services.reports import PERIODS
 from app.telegram.texts import (
     REJECT_REASONS,
     google_maps_url,
@@ -75,37 +76,46 @@ def reject_reasons_keyboard(order_id: int) -> InlineKeyboardMarkup:
 BACK_TO_MAIN = _btn("⬅️ Bosh menyu", AdminCb(action="main"))
 
 
-def main_menu_keyboard(shop: ShopSettings) -> InlineKeyboardMarkup:
+def main_menu_keyboard(shop: ShopSettings, role: str = "owner") -> InlineKeyboardMarkup:
     toggle = (
         _btn("⏸ Buyurtma qabul qilishni to'xtatish", AdminCb(action="pause"))
         if shop.is_accepting_orders
         else _btn("▶️ Buyurtma qabul qilishni yoqish", AdminCb(action="resume"))
     )
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    report = _btn("📊 Hisobot", AdminCb(action="report"))
+    if role == "staff":
+        rows = [[_btn("🍽 Menyu", AdminCb(action="menu")), report], [toggle]]
+    else:
+        rows = [
             [_btn("🍽 Menyu", AdminCb(action="menu")), _btn("📂 Kategoriyalar", AdminCb(action="cats"))],
-            [_btn("⚙️ Sozlamalar", AdminCb(action="settings")), _btn("📊 Bugungi hisobot", AdminCb(action="report"))],
+            [_btn("⚙️ Sozlamalar", AdminCb(action="settings")), report],
+            [_btn("👥 Adminlar va xodimlar", AdminCb(action="team"))],
             [toggle],
         ]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def menu_keyboard(products: list[Product]) -> InlineKeyboardMarkup:
+def menu_keyboard(products: list[Product], full: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for product in products:
         builder.row(_btn(product_button_label(product), AdminCb(action="prod", id=product.id)))
-    builder.row(_btn("➕ Taom qo'shish", AdminCb(action="prod_add")))
+    if full:
+        builder.row(_btn("➕ Taom qo'shish", AdminCb(action="prod_add")))
     builder.row(BACK_TO_MAIN)
     return builder.as_markup()
 
 
-def product_keyboard(product: Product) -> InlineKeyboardMarkup:
+def product_keyboard(product: Product, full: bool = True) -> InlineKeyboardMarkup:
     pid = product.id
     toggle = (
         _btn("⛔ Tugadi deb belgilash", AdminCb(action="prod_off", id=pid))
         if product.is_available
         else _btn("✅ Yana bor deb belgilash", AdminCb(action="prod_on", id=pid))
     )
+    if not full:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[toggle], [_btn("⬅️ Menyuga qaytish", AdminCb(action="menu"))]]
+        )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [toggle],
@@ -179,6 +189,9 @@ SETTING_BUTTONS = [
     ("🕐 Ish vaqti", "hours"),
     ("📞 Kafe telefoni", "phone"),
     ("📍 Kafe joylashuvi", "location"),
+    ("⏰ Qabul qilinmasa eslatma", "alert_accept"),
+    ("⏰ Yo'lda uzoq qolsa eslatma", "alert_delivery"),
+    ("📊 Kunlik hisobot", "daily_report"),
 ]
 
 
@@ -203,3 +216,68 @@ def skip_keyboard(action: str) -> InlineKeyboardMarkup:
 
 def back_keyboard(back: AdminCb, label: str = "⬅️ Orqaga") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[_btn(label, back)]])
+
+
+# ---------- Hisobot ----------
+
+
+def report_keyboard(current: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for key, title in PERIODS.items():
+        label = f"• {title} •" if key == current else title
+        builder.button(text=label, callback_data=AdminCb(action="rep", value=key).pack())
+    builder.adjust(2, 2, 1)
+    builder.row(BACK_TO_MAIN)
+    return builder.as_markup()
+
+
+def daily_report_keyboard(current: str) -> InlineKeyboardMarkup:
+    options = [("Guruhga", "group"), ("Adminlarga", "admins"), ("Yuborilmasin", "off")]
+    row = [
+        _btn(f"✅ {label}" if value == current else label, AdminCb(action="set_report", value=value))
+        for label, value in options
+    ]
+    return InlineKeyboardMarkup(
+        inline_keyboard=[row, [_btn("⬅️ Sozlamalar", AdminCb(action="settings"))]]
+    )
+
+
+# ---------- Mijoz kartasi ----------
+
+
+def customer_keyboard(phone: str, blocked: bool, can_block: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if can_block:
+        if blocked:
+            rows.append([_btn("✅ Blokdan chiqarish", AdminCb(action="cust_unblock", value=phone))])
+        else:
+            rows.append([_btn("🚫 Bloklash", AdminCb(action="cust_block", value=phone))])
+    rows.append([BACK_TO_MAIN])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------- Xodimlar ----------
+
+
+def team_keyboard(members: list[Staff], can_manage_admins: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for member in members:
+        if member.role == "admin" and not can_manage_admins:
+            continue
+        builder.row(_btn(f"🗑 {member.name}", AdminCb(action="team_del", id=member.id)))
+    if can_manage_admins:
+        builder.row(_btn("➕ Admin qo'shish", AdminCb(action="team_inv", value="admin")))
+    builder.row(_btn("➕ Xodim qo'shish", AdminCb(action="team_inv", value="staff")))
+    builder.row(BACK_TO_MAIN)
+    return builder.as_markup()
+
+
+def confirm_remove_keyboard(member_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _btn("🗑 Ha, olib tashlansin", AdminCb(action="team_del_yes", id=member_id)),
+                _btn("⬅️ Yo'q", AdminCb(action="team")),
+            ]
+        ]
+    )

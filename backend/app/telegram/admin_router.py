@@ -1,10 +1,8 @@
 """Admin bo'limi: botga shaxsiy yozishmada, faqat AMORA_ADMIN_IDS ro'yxatidagilar uchun."""
 
 import logging
-from datetime import datetime, time
 from pathlib import Path
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -16,12 +14,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.models import Category, Customer, Order, OrderStatus, Product
+from app.models import Category, Customer, Product
 from app.security import normalize_phone
-from app.services.shop import format_sum, get_shop, is_open_now
+from app.services.shop import get_shop, is_open_now
 from app.telegram import keyboards as kb
 from app.telegram import texts
-from app.telegram.filters import IsAdmin
+from app.telegram.filters import STAFF, protect
 from app.telegram.keyboards import AdminCb
 from app.telegram.texts import escape
 from app.telegram.parsing import parse_amount, parse_hours, parse_km
@@ -30,9 +28,7 @@ from app.telegram.publisher import SessionFactory
 log = logging.getLogger(__name__)
 
 
-router = Router(name="admin")
-router.message.filter(F.chat.type == "private", IsAdmin())
-router.callback_query.filter(IsAdmin())
+router = protect(Router(name="admin"))
 
 
 class AddProduct(StatesGroup):
@@ -110,32 +106,44 @@ async def category_name(session: AsyncSession, category_id: int | None) -> str |
     return category.name if category is not None and category.is_active else None
 
 
-async def show_main(event: Message | CallbackQuery, session: AsyncSession, cfg: Settings, notice=None):
+async def show_main(
+    event: Message | CallbackQuery, session: AsyncSession, cfg: Settings, role: str, notice=None
+):
     shop = await get_shop(session)
     await session.commit()
     await show(
         event,
-        texts.main_menu_text(shop, is_open_now(shop, cfg.timezone)),
-        kb.main_menu_keyboard(shop),
+        texts.main_menu_text(shop, is_open_now(shop, cfg.timezone), role),
+        kb.main_menu_keyboard(shop, role),
         notice,
     )
 
 
-async def show_menu(event: Message | CallbackQuery, session: AsyncSession, notice=None):
+async def show_menu(
+    event: Message | CallbackQuery, session: AsyncSession, notice=None, role: str | None = None
+):
     products = await load_products(session)
-    text = "🍽 <b>Menyu</b>\n\nTaomni tanlang yoki yangisini qo'shing."
-    if not products:
-        text = "🍽 <b>Menyu</b>\n\nHozircha taom yo'q. Birinchisini qo'shing."
-    await show(event, text, kb.menu_keyboard(products), notice)
+    full = role != STAFF
+    if full:
+        text = "🍽 <b>Menyu</b>\n\nTaomni tanlang yoki yangisini qo'shing."
+        if not products:
+            text = "🍽 <b>Menyu</b>\n\nHozircha taom yo'q. Birinchisini qo'shing."
+    else:
+        text = "🍽 <b>Menyu</b>\n\nTugagan yoki yana paydo bo'lgan taomni tanlang."
+    await show(event, text, kb.menu_keyboard(products, full=full), notice)
 
 
 async def show_product(
-    event: Message | CallbackQuery, session: AsyncSession, product: Product, notice=None
+    event: Message | CallbackQuery,
+    session: AsyncSession,
+    product: Product,
+    notice=None,
+    role: str | None = None,
 ):
     await show(
         event,
         texts.product_card(product, await category_name(session, product.category_id)),
-        kb.product_keyboard(product),
+        kb.product_keyboard(product, full=role != STAFF),
         notice,
     )
 
@@ -176,15 +184,17 @@ def remove_photo_file(media_dir: Path, relative: str | None) -> None:
 
 @router.message(CommandStart())
 @router.message(Command("menu", "bekor", "cancel"))
-async def cmd_start(message: Message, state: FSMContext, session_factory: SessionFactory, cfg: Settings):
+async def cmd_start(
+    message: Message, state: FSMContext, session_factory: SessionFactory, cfg: Settings, role: str
+):
     await state.clear()
     async with session_factory() as session:
-        await show_main(message, session, cfg)
+        await show_main(message, session, cfg, role)
 
 
 @router.message(Command("help", "yordam"))
-async def cmd_help(message: Message):
-    await message.answer(texts.HELP_TEXT)
+async def cmd_help(message: Message, role: str):
+    await message.answer(texts.help_text(role))
 
 
 # ---------- Raqamni bloklash ----------
@@ -221,15 +231,25 @@ async def cmd_unblock(message: Message, command: CommandObject, session_factory:
 
 
 @router.callback_query(AdminCb.filter(F.action == "main"))
-async def cb_main(callback: CallbackQuery, state: FSMContext, session_factory: SessionFactory, cfg: Settings):
+async def cb_main(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session_factory: SessionFactory,
+    cfg: Settings,
+    role: str,
+):
     await state.clear()
     async with session_factory() as session:
-        await show_main(callback, session, cfg)
+        await show_main(callback, session, cfg, role)
 
 
 @router.callback_query(AdminCb.filter(F.action.in_({"pause", "resume"})))
 async def cb_toggle_accepting(
-    callback: CallbackQuery, callback_data: AdminCb, session_factory: SessionFactory, cfg: Settings
+    callback: CallbackQuery,
+    callback_data: AdminCb,
+    session_factory: SessionFactory,
+    cfg: Settings,
+    role: str,
 ):
     accepting = callback_data.action == "resume"
     async with session_factory() as session:
@@ -237,46 +257,52 @@ async def cb_toggle_accepting(
         shop.is_accepting_orders = accepting
         await session.commit()
         notice = "Buyurtmalar yana qabul qilinadi" if accepting else "Buyurtma qabul qilish to'xtatildi"
-        await show_main(callback, session, cfg, notice)
+        await show_main(callback, session, cfg, role, notice)
 
 
 # ---------- Menyu: taomlar ----------
 
 
 @router.callback_query(AdminCb.filter(F.action == "menu"))
-async def cb_menu(callback: CallbackQuery, state: FSMContext, session_factory: SessionFactory):
+async def cb_menu(
+    callback: CallbackQuery, state: FSMContext, session_factory: SessionFactory, role: str
+):
     await state.clear()
     async with session_factory() as session:
-        await show_menu(callback, session)
+        await show_menu(callback, session, role=role)
 
 
 @router.callback_query(AdminCb.filter(F.action == "prod"))
 async def cb_product(
-    callback: CallbackQuery, callback_data: AdminCb, state: FSMContext, session_factory: SessionFactory
+    callback: CallbackQuery,
+    callback_data: AdminCb,
+    state: FSMContext,
+    session_factory: SessionFactory,
+    role: str,
 ):
     await state.clear()
     async with session_factory() as session:
         product = await load_product(session, callback_data.id)
         if product is None:
-            await show_menu(callback, session, "Bu taom o'chirilgan")
+            await show_menu(callback, session, "Bu taom o'chirilgan", role=role)
             return
-        await show_product(callback, session, product)
+        await show_product(callback, session, product, role=role)
 
 
 @router.callback_query(AdminCb.filter(F.action.in_({"prod_on", "prod_off"})))
 async def cb_product_toggle(
-    callback: CallbackQuery, callback_data: AdminCb, session_factory: SessionFactory
+    callback: CallbackQuery, callback_data: AdminCb, session_factory: SessionFactory, role: str
 ):
     available = callback_data.action == "prod_on"
     async with session_factory() as session:
         product = await load_product(session, callback_data.id)
         if product is None:
-            await show_menu(callback, session, "Bu taom o'chirilgan")
+            await show_menu(callback, session, "Bu taom o'chirilgan", role=role)
             return
         product.is_available = available
         await session.commit()
         notice = "Taom yana sotuvda" if available else "Taom tugagan deb belgilandi"
-        await show_product(callback, session, product, notice)
+        await show_product(callback, session, product, notice, role=role)
 
 
 PRODUCT_PROMPTS = {
@@ -631,7 +657,22 @@ SETTING_PROMPTS = {
     "hours": "Ish vaqtini yozing, masalan: 09:00-23:00\nKecha-kunduz ishlasangiz: 00:00-00:00",
     "phone": "Mijozlar qo'ng'iroq qiladigan raqamni yozing, masalan: 90 123 45 67",
     "location": "Kafe joylashuvini yuboring: 📎 tugmasi → Joylashuv (Location).",
+    "alert_accept": (
+        "Yangi buyurtma necha daqiqa qabul qilinmasa, guruhga eslatma kelsin? Masalan: 5\n"
+        "Eslatma kerak bo'lmasa 0 yozing."
+    ),
+    "alert_delivery": (
+        "Buyurtma necha daqiqa yo'lda tursa, guruhga eslatma kelsin? Masalan: 45\n"
+        "Eslatma kerak bo'lmasa 0 yozing."
+    ),
 }
+
+
+def parse_minutes(raw: str) -> int:
+    cleaned = raw.lower().replace("daqiqa", "").replace("min", "").strip()
+    if not cleaned.isdigit() or int(cleaned) > 24 * 60:
+        raise ValueError("Daqiqani raqam bilan yozing, masalan: 5. O'chirish uchun 0.")
+    return int(cleaned)
 
 
 @router.callback_query(AdminCb.filter(F.action == "settings"))
@@ -642,8 +683,20 @@ async def cb_settings(callback: CallbackQuery, state: FSMContext, session_factor
 
 
 @router.callback_query(AdminCb.filter(F.action == "set"))
-async def cb_setting_edit(callback: CallbackQuery, callback_data: AdminCb, state: FSMContext):
+async def cb_setting_edit(
+    callback: CallbackQuery, callback_data: AdminCb, state: FSMContext, session_factory: SessionFactory
+):
     key = callback_data.value
+    if key == "daily_report":
+        async with session_factory() as session:
+            shop = await get_shop(session)
+            await session.commit()
+        await show(
+            callback,
+            "📊 <b>Kunlik hisobot</b>\n\nKafe yopilganda o'sha kun hisoboti qayerga kelsin?",
+            kb.daily_report_keyboard(shop.daily_report_to),
+        )
+        return
     if key not in SETTING_PROMPTS:
         await callback.answer()
         return
@@ -671,6 +724,10 @@ async def msg_setting_value(message: Message, state: FSMContext, session_factory
                 shop.open_time, shop.close_time = parse_hours(text)
             elif key == "phone":
                 shop.phone = normalize_phone(text)
+            elif key == "alert_accept":
+                shop.alert_accept_minutes = parse_minutes(text)
+            elif key == "alert_delivery":
+                shop.alert_delivery_minutes = parse_minutes(text)
             elif key == "location":
                 if message.location is None:
                     raise ValueError(SETTING_PROMPTS["location"])
@@ -684,42 +741,28 @@ async def msg_setting_value(message: Message, state: FSMContext, session_factory
         await show_settings(message, session)
 
 
-# ---------- Hisobot ----------
+# ---------- Kunlik hisobot sozlamasi ----------
 
 
-@router.callback_query(AdminCb.filter(F.action == "report"))
-async def cb_report(callback: CallbackQuery, session_factory: SessionFactory, cfg: Settings):
-    zone = ZoneInfo(cfg.timezone)
-    today = datetime.now(zone).date()
-    day_start = datetime.combine(today, time.min, tzinfo=zone)
+@router.callback_query(AdminCb.filter(F.action == "set_report"))
+async def cb_set_daily_report(
+    callback: CallbackQuery, callback_data: AdminCb, session_factory: SessionFactory
+):
+    if callback_data.value not in texts.DAILY_REPORT_TARGETS:
+        await callback.answer()
+        return
     async with session_factory() as session:
-        rows = await session.execute(
-            select(Order.status, func.count(), func.coalesce(func.sum(Order.total), 0))
-            .where(Order.created_at >= day_start)
-            .group_by(Order.status)
-        )
-        stats = {OrderStatus(status): (count, total) for status, count, total in rows}
-
-    def count(status: OrderStatus) -> int:
-        return stats.get(status, (0, 0))[0]
-
-    delivered_count, delivered_total = stats.get(OrderStatus.DELIVERED, (0, 0))
-    in_progress = count(OrderStatus.NEW) + count(OrderStatus.ACCEPTED) + count(OrderStatus.DELIVERING)
-    lines = [
-        f"📊 <b>Bugungi hisobot</b> ({today:%d.%m.%Y})",
-        "",
-        f"Jami buyurtmalar: {sum(c for c, _ in stats.values())}",
-        f"✅ Yetkazildi: {delivered_count} ta, {format_sum(delivered_total)}",
-        f"⏳ Jarayonda: {in_progress}",
-        f"❌ Rad etildi: {count(OrderStatus.REJECTED)}",
-        f"🚫 Mijoz bekor qildi: {count(OrderStatus.CANCELLED)}",
-    ]
-    await show(callback, "\n".join(lines), kb.back_keyboard(AdminCb(action="main"), "⬅️ Bosh menyu"))
+        shop = await get_shop(session)
+        shop.daily_report_to = callback_data.value
+        await session.commit()
+        await show_settings(callback, session, "Saqlandi")
 
 
 @router.message()
-async def msg_unknown(message: Message, state: FSMContext, session_factory: SessionFactory, cfg: Settings):
+async def msg_unknown(
+    message: Message, state: FSMContext, session_factory: SessionFactory, cfg: Settings, role: str
+):
     """Tushunarsiz xabar: bosh menyuni ko'rsatamiz."""
     await state.clear()
     async with session_factory() as session:
-        await show_main(message, session, cfg)
+        await show_main(message, session, cfg, role)

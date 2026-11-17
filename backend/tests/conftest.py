@@ -107,3 +107,47 @@ async def auth(client) -> dict:
 
 # Kafedan taxminan 1 km uzoqlikdagi manzil
 NEAR = {"latitude": 39.6600, "longitude": 66.9680}
+
+
+# ---------- Telegram bot ----------
+
+
+@pytest.fixture
+def bot_cfg(cfg):
+    from tests.telegram_fakes import ADMIN_ID, GROUP_ID
+
+    cfg.orders_chat_id = GROUP_ID
+    cfg.admin_ids = str(ADMIN_ID)
+    return cfg
+
+
+@pytest.fixture
+async def bot():
+    from tests.telegram_fakes import make_fake_bot
+
+    return make_fake_bot()
+
+
+@pytest.fixture
+def tg(bot):
+    return bot.session
+
+
+@pytest.fixture
+def driver(bot, bot_cfg, session_factory):
+    from tests.telegram_fakes import Driver, get_dispatcher
+
+    return Driver(get_dispatcher(bot_cfg, session_factory), bot)
+
+
+@pytest.fixture
+async def api(bot, bot_cfg, engine, session_factory):
+    """API haqiqiy TelegramNotifier bilan: buyurtma berilganda (soxta) guruhga xabar ketadi."""
+    from app.telegram.publisher import TelegramNotifier
+    from tests.telegram_fakes import GROUP_ID
+
+    notifier = TelegramNotifier(bot, GROUP_ID, session_factory, bot_cfg.timezone)
+    app = create_app(bot_cfg, engine=engine, notifier=notifier)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as client:
+        yield client

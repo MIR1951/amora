@@ -11,6 +11,7 @@ from aiogram.methods import (
     EditMessageReplyMarkup,
     EditMessageText,
     GetFile,
+    GetMe,
     SendMessage,
     TelegramMethod,
 )
@@ -38,7 +39,9 @@ class FakeSession(BaseSession):
     def __init__(self):
         super().__init__()
         self.requests: list[TelegramMethod] = []
-        self.fail_with: Exception | None = None
+        self.fail_with: BaseException | None = None
+        # Faqat shu chatlarga yuborishda xato (bot guruhdan chiqarilgan va h.k.)
+        self.failing_chats: dict[int, Exception] = {}
         self._next_message_id = 1000
 
     async def close(self) -> None:
@@ -47,6 +50,9 @@ class FakeSession(BaseSession):
     async def make_request(self, bot, method, timeout=None):
         if self.fail_with is not None:
             raise self.fail_with
+        chat_error = self.failing_chats.get(getattr(method, "chat_id", None))
+        if chat_error is not None:
+            raise chat_error
         self.requests.append(method)
         if isinstance(method, SendMessage):
             self._next_message_id += 1
@@ -56,6 +62,8 @@ class FakeSession(BaseSession):
                 chat=Chat(id=method.chat_id, type="supergroup"),
                 text=method.text,
             )
+        if isinstance(method, GetMe):
+            return User(id=4242, is_bot=True, first_name="Amora", username="amora_test_bot")
         if isinstance(method, GetFile):
             return File(file_id=method.file_id, file_unique_id="unique", file_path="photos/a.jpg")
         return True
@@ -141,13 +149,15 @@ class Driver:
         chat = Chat(id=chat_id or user_id, type="private" if chat_id is None else "supergroup")
         await self._feed(message=self._message(self._user(user_id), chat, text=text))
 
-    async def send_photo(self, user_id: int = ADMIN_ID) -> None:
+    async def send_photo(self, user_id: int = ADMIN_ID, caption: str | None = None) -> None:
         photo = [
             PhotoSize(file_id="small", file_unique_id="s", width=90, height=90),
             PhotoSize(file_id="big", file_unique_id="b", width=1280, height=960),
         ]
         chat = Chat(id=user_id, type="private")
-        await self._feed(message=self._message(self._user(user_id), chat, photo=photo))
+        await self._feed(
+            message=self._message(self._user(user_id), chat, photo=photo, caption=caption)
+        )
 
     async def send_location(self, latitude: float, longitude: float, user_id: int = ADMIN_ID) -> None:
         chat = Chat(id=user_id, type="private")
