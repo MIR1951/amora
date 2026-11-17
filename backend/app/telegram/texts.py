@@ -1,11 +1,12 @@
 """Telegram xabarlari matni. Hamma joyda HTML formatlash ishlatiladi."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape as _html_escape
 from zoneinfo import ZoneInfo
 
-from app.models import Order, OrderStatus, Product, ShopSettings
+from app.models import STATUS_LABELS, Order, OrderStatus, Product, ShopSettings, Staff
 from app.services.orders import CUSTOMER_ACTOR
+from app.services.reports import Report
 from app.services.shop import format_sum
 
 def escape(value: str) -> str:
@@ -78,7 +79,12 @@ def order_text(order: Order, tz_name: str) -> str:
     lines.append(f"<b>Jami: {format_sum(order.total)}</b> (naqd)")
     lines.append("")
 
-    lines.append(f"👤 {escape(order.customer_name)}")
+    customer = f"👤 {escape(order.customer_name)}"
+    if order.customer_order_no == 1:
+        customer += " · 🆕 yangi mijoz"
+    elif order.customer_order_no:
+        customer += f" · {order.customer_order_no}-buyurtmasi"
+    lines.append(customer)
     lines.append(f"📞 {escape(order.phone)}")
     address = escape(order.address_note) if order.address_note else "xaritada ko'rsatilgan"
     if order.distance_km is not None:
@@ -138,14 +144,17 @@ def hours_text(shop: ShopSettings) -> str:
     return f"{shop.open_time:%H:%M}–{shop.close_time:%H:%M}"
 
 
-def main_menu_text(shop: ShopSettings, is_open: bool) -> str:
+def main_menu_text(shop: ShopSettings, is_open: bool, role: str = "owner") -> str:
     if not shop.is_accepting_orders:
         state = "⏸ Buyurtma qabul qilish to'xtatilgan"
     elif is_open:
         state = "✅ Buyurtmalar qabul qilinmoqda"
     else:
         state = "🌙 Hozir ish vaqti emas"
-    return f"<b>{escape(shop.cafe_name)} boshqaruvi</b>\n\n{state}\nIsh vaqti: {hours_text(shop)}"
+    text = f"<b>{escape(shop.cafe_name)} boshqaruvi</b>\n\n{state}\nIsh vaqti: {hours_text(shop)}"
+    if role == "staff":
+        text += "\n\nMijoz haqida bilish uchun: /mijoz 901234567"
+    return text
 
 
 def settings_text(shop: ShopSettings) -> str:
@@ -166,17 +175,201 @@ def settings_text(shop: ShopSettings) -> str:
         f"Ish vaqti: {hours_text(shop)}",
         f"Kafe telefoni: {escape(shop.phone) if shop.phone else 'yozilmagan'}",
         f"Kafe joylashuvi: {location}",
+        "",
+        f"⏰ Qabul qilinmasa eslatma: {minutes_text(shop.alert_accept_minutes)}",
+        f"⏰ Yo'lda uzoq qolsa eslatma: {minutes_text(shop.alert_delivery_minutes)}",
+        f"📊 Kunlik hisobot: {DAILY_REPORT_TARGETS[shop.daily_report_to]}",
     ]
     if shop.max_delivery_km and not has_location:
         lines += ["", "⚠️ Masofa chegarasi ishlashi uchun kafe joylashuvini belgilang."]
     return "\n".join(lines)
 
 
-HELP_TEXT = (
-    "<b>Buyruqlar</b>\n"
-    "/start — boshqaruv menyusi\n"
-    "/blok 901234567 — raqamni bloklash (soxta buyurtma bergan mijoz)\n"
-    "/ochish 901234567 — raqamni blokdan chiqarish\n"
-    "/id — shu chat va sizning Telegram ID raqamingiz\n"
-    "/bekor — boshlangan amalni bekor qilish"
-)
+def minutes_text(minutes: int) -> str:
+    return f"{minutes} daqiqadan keyin" if minutes else "o'chiq"
+
+
+DAILY_REPORT_TARGETS = {
+    "group": "kafe yopilganda guruhga",
+    "admins": "kafe yopilganda adminlarga",
+    "off": "yuborilmaydi",
+}
+
+
+def help_text(role: str) -> str:
+    lines = [
+        "<b>Buyruqlar</b>",
+        "/start — boshqaruv menyusi",
+        "/mijoz 901234567 — mijoz kartasi: buyurtmalari va jami xaridi",
+    ]
+    if role != "staff":
+        lines += [
+            "/blok 901234567 — raqamni bloklash (soxta buyurtma bergan mijoz)",
+            "/ochish 901234567 — raqamni blokdan chiqarish",
+        ]
+    lines += [
+        "/id — shu chat va sizning Telegram ID raqamingiz",
+        "/bekor — boshlangan amalni bekor qilish",
+    ]
+    return "\n".join(lines)
+
+
+HELP_TEXT = help_text("owner")
+
+
+# ---------- Hisobot ----------
+
+
+def _percent_change(now: int, before: int) -> str:
+    if before == 0:
+        return "yangi" if now else "o'zgarmadi"
+    change = round((now - before) * 100 / before)
+    return f"{change:+d}%"
+
+
+def _range_text(report: Report, tz_name: str) -> str:
+    zone = ZoneInfo(tz_name)
+    start = report.start.astimezone(zone)
+    end = report.end.astimezone(zone)
+    if end - start <= timedelta(days=1) and start.date() == (end - timedelta(seconds=1)).date():
+        return f"{start:%d.%m.%Y}, {start:%H:%M}–{end:%H:%M}"
+    return f"{start:%d.%m.%Y %H:%M} – {end:%d.%m.%Y %H:%M}"
+
+
+def report_text(report: Report, tz_name: str, compare_title: str | None = None) -> str:
+    lines = [f"📊 <b>Hisobot: {escape(report.title)}</b>", _range_text(report, tz_name), ""]
+    if not report.orders:
+        lines.append("Bu davrda buyurtma bo'lmadi.")
+    else:
+        status = report.by_status
+        lines += [
+            f"🧾 Buyurtmalar: {report.orders}",
+            f"✅ Yetkazildi: {report.delivered} · ⏳ Jarayonda: {report.in_progress}",
+            f"❌ Rad etildi: {status[OrderStatus.REJECTED]} · "
+            f"🚫 Bekor qilindi: {status[OrderStatus.CANCELLED]}",
+            "",
+            f"💰 Tushum (yetkazilganlar): <b>{format_sum(report.revenue)}</b>",
+            f"taomlar {format_sum(report.items_revenue)}, "
+            f"yetkazish {format_sum(report.delivery_revenue)}",
+            f"🧮 O'rtacha chek: {format_sum(report.average_check)}",
+        ]
+    if compare_title and report.previous_revenue is not None:
+        lines.append(
+            f"📈 {compare_title.capitalize()} nisbatan: "
+            f"{_percent_change(report.revenue, report.previous_revenue)} "
+            f"(u yerda {format_sum(report.previous_revenue)}, {report.previous_delivered} ta)"
+        )
+    if report.orders:
+        customers = report.new_customers + report.returning_customers
+        lines += ["", f"👥 Mijozlar: {customers}, shundan yangi: {report.new_customers}"]
+        if report.busiest_hour:
+            hour, count = report.busiest_hour
+            lines.append(f"🕖 Eng band soat: {hour:02d}:00–{(hour + 1) % 24:02d}:00 ({count} ta)")
+    if report.top_products:
+        lines += ["", "🏆 <b>Ko'p sotilgan taomlar</b>"]
+        for place, (name, quantity, amount) in enumerate(report.top_products, start=1):
+            lines.append(f"{place}. {escape(name)} — {quantity} ta, {format_sum(amount)}")
+    if report.reject_reasons:
+        lines += ["", "❌ <b>Rad etish sabablari</b>"]
+        for reason, count in report.reject_reasons:
+            lines.append(f"{escape(reason)} — {count}")
+    return "\n".join(lines)
+
+
+# ---------- Kechikish eslatmasi ----------
+
+
+def delay_alert_text(order: Order, minutes: int) -> str:
+    if order.status_enum == OrderStatus.NEW:
+        return (
+            f"⏰ <b>№{order.id}</b> buyurtma {minutes} daqiqadan beri qabul qilinmadi! "
+            "Mijoz javob kutyapti."
+        )
+    return (
+        f"⏰ <b>№{order.id}</b> buyurtma {minutes} daqiqadan beri yo'lda. "
+        f"Kuryer bilan bog'lanib, holatini bilib oling. Mijoz: {escape(order.phone)}"
+    )
+
+
+# ---------- Mijoz kartasi ----------
+
+
+def customer_card(
+    phone: str,
+    names: list[str],
+    orders: list[Order],
+    favourites: list[tuple[str, int]],
+    blocked: bool,
+    tz_name: str,
+) -> str:
+    zone = ZoneInfo(tz_name)
+    counts = {status: 0 for status in OrderStatus}
+    spent = 0
+    for order in orders:
+        counts[order.status_enum] += 1
+        if order.status_enum == OrderStatus.DELIVERED:
+            spent += order.total
+    delivered = counts[OrderStatus.DELIVERED]
+    title = ", ".join(escape(name) for name in names) or "Ismi yo'q"
+    lines = [f"👤 <b>{title}</b>", f"📞 {escape(phone)}"]
+    if blocked:
+        lines.append("🚫 <b>Bloklangan:</b> bu raqamdan buyurtma berib bo'lmaydi")
+    lines.append("")
+    if not orders:
+        lines.append("Bu raqamdan hali buyurtma berilmagan.")
+        return "\n".join(lines)
+    first = min(order.created_at for order in orders).astimezone(zone)
+    last = max(order.created_at for order in orders).astimezone(zone)
+    lines += [
+        f"🧾 Buyurtmalar: {len(orders)} ta",
+        f"✅ Yetkazildi: {delivered} · ❌ Rad etildi: {counts[OrderStatus.REJECTED]} · "
+        f"🚫 Bekor qildi: {counts[OrderStatus.CANCELLED]}",
+        f"💰 Jami xarid: {format_sum(spent)}"
+        + (f" · o'rtacha {format_sum(round(spent / delivered))}" if delivered else ""),
+        f"📅 Birinchi buyurtma: {first:%d.%m.%Y}, oxirgisi: {last:%d.%m.%Y}",
+    ]
+    fake = sum(1 for order in orders if order.reject_reason == "Soxta buyurtma")
+    if fake:
+        lines.append(f"⚠️ {fake} marta soxta buyurtma deb rad etilgan")
+    if favourites:
+        liked = ", ".join(f"{escape(name)} ({quantity})" for name, quantity in favourites)
+        lines.append(f"❤️ Ko'p oladi: {liked}")
+    lines += ["", "<b>Oxirgi buyurtmalar</b>"]
+    for order in sorted(orders, key=lambda item: item.id, reverse=True)[:5]:
+        moment = order.created_at.astimezone(zone)
+        lines.append(
+            f"№{order.id} · {moment:%d.%m %H:%M} · {format_sum(order.total)} · "
+            f"{STATUS_EMOJI[order.status_enum]} {STATUS_LABELS[order.status_enum]}"
+        )
+    return "\n".join(lines)
+
+
+# ---------- Xodimlar ----------
+
+
+def team_text(owner_ids: list[int], members: list[Staff]) -> str:
+    lines = [
+        "👥 <b>Adminlar va xodimlar</b>",
+        "",
+        "Admin hamma narsani qila oladi. Xodim esa faqat taomni bor/tugadi qiladi, "
+        "qabulni to'xtatadi, hisobot va mijoz kartasini ko'radi.",
+        "",
+    ]
+    for owner_id in owner_ids:
+        lines.append(f"👑 Egasi · ID <code>{owner_id}</code>")
+    for member in members:
+        mark = "🛡 Admin" if member.role == "admin" else "🙋 Xodim"
+        lines.append(f"{mark} · {escape(member.name)}")
+    if not members:
+        lines += ["", "Hali hech kim qo'shilmagan."]
+    return "\n".join(lines)
+
+
+def invite_text(link: str, role: str, hours: int) -> str:
+    who = "admin" if role == "admin" else "xodim"
+    return (
+        f"🔗 <b>Yangi {who} uchun taklif havolasi</b>\n\n"
+        f"{escape(link)}\n\n"
+        f"Havolani faqat o'sha odamga yuboring. U havolani bosib, botda <b>Start</b> ni "
+        f"bossa, {who} bo'lib qo'shiladi. Havola {hours} soat amal qiladi va faqat bir marta ishlaydi."
+    )

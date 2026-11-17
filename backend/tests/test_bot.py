@@ -1,6 +1,5 @@
 from datetime import time
 
-import httpx
 import pytest
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.methods import (
@@ -21,44 +20,9 @@ from tests.telegram_fakes import (
     FAKE_JPEG,
     GROUP_ID,
     STRANGER_ID,
-    Driver,
     button_labels,
     find_button,
-    get_dispatcher,
-    make_fake_bot,
 )
-
-
-@pytest.fixture
-def bot_cfg(cfg):
-    cfg.orders_chat_id = GROUP_ID
-    cfg.admin_ids = str(ADMIN_ID)
-    return cfg
-
-
-@pytest.fixture
-async def bot():
-    return make_fake_bot()
-
-
-@pytest.fixture
-def tg(bot):
-    return bot.session
-
-
-@pytest.fixture
-def driver(bot, bot_cfg, session_factory) -> Driver:
-    return Driver(get_dispatcher(bot_cfg, session_factory), bot)
-
-
-@pytest.fixture
-async def api(bot, bot_cfg, engine, session_factory):
-    """API haqiqiy TelegramNotifier bilan: buyurtma berilganda (soxta) guruhga xabar ketadi."""
-    notifier = TelegramNotifier(bot, GROUP_ID, session_factory, bot_cfg.timezone)
-    app = create_app(bot_cfg, engine=engine, notifier=notifier)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as client:
-        yield client
 
 
 async def place_order(api, seed, auth=None, **extra) -> tuple[dict, dict]:
@@ -282,7 +246,8 @@ async def test_admin_main_menu(driver, seed):
         "🍽 Menyu",
         "📂 Kategoriyalar",
         "⚙️ Sozlamalar",
-        "📊 Bugungi hisobot",
+        "📊 Hisobot",
+        "👥 Adminlar va xodimlar",
         "⏸ Buyurtma qabul qilishni to'xtatish",
     ]
 
@@ -561,13 +526,13 @@ async def test_daily_report(api, seed, driver, session_factory, bot_cfg):
         await session.commit()
 
     await driver.say("/start")
-    await driver.press("Bugungi hisobot")
+    await driver.press("Hisobot")
     screen = driver.screen
-    assert "Jami buyurtmalar: 4" in screen
-    assert "Yetkazildi: 1 ta, 110 000 so'm" in screen
-    assert "Jarayonda: 1" in screen
-    assert "Rad etildi: 1" in screen
-    assert "Mijoz bekor qildi: 1" in screen
+    assert "Hisobot: Bugun" in screen
+    assert "Buyurtmalar: 4" in screen
+    assert "Yetkazildi: 1 · ⏳ Jarayonda: 1" in screen
+    assert "Rad etildi: 1 · 🚫 Bekor qilindi: 1" in screen
+    assert "Tushum (yetkazilganlar): <b>110 000 so'm</b>" in screen
 
 
 async def test_block_and_unblock_phone(driver, seed, client, auth, session_factory):
@@ -748,7 +713,7 @@ async def test_commands_are_set_in_background_with_retry(bot, tg, monkeypatch):
     await bot_module.set_commands_in_background(bot)
     assert sleeps_before_first_try == [0] and sleeps == [30]
     assert len(tg.of_type(SetMyCommands)) == 1
-    assert [c.command for c in tg.of_type(SetMyCommands)[0].commands] == ["start", "help", "id"]
+    assert [c.command for c in tg.of_type(SetMyCommands)[0].commands] == ["start", "mijoz", "help", "id"]
 
 
 def test_bot_requests_time_out_quickly():

@@ -26,18 +26,24 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 - `❌ Rad etish`: avval sababini so'raydi, shuning uchun tasodifan bosib yuborilmaydi
 - `📍 Google xarita` va `📍 Yandex xarita`: kuryer manzilni xaritada ochadi
 
-Har bir bosishda xabar yangilanadi va kim, qachon bosgani yozib qo'yiladi. Mijozning ilovasida holat shu zahoti o'zgaradi. Mijoz buyurtmani bekor qilsa, guruhga alohida xabar keladi.
+Mijoz ismi yonida "🆕 yangi mijoz" yoki "5-buyurtmasi" yoziladi. Har bir bosishda xabar yangilanadi va kim, qachon bosgani yozib qo'yiladi. Mijozning ilovasida holat shu zahoti o'zgaradi. Mijoz buyurtmani bekor qilsa, guruhga alohida xabar keladi.
 
 Telegram vaqtincha ishlamay qolsa ham buyurtma yo'qolmaydi: bot har 20 soniyada guruhga yetib bormagan buyurtmalarni qayta yuboradi.
 
-**Admin bo'limi.** Adminlar botga shaxsiy yozishmada `/start` yozadi:
+**Kechikish eslatmasi.** Yangi buyurtma 5 daqiqa qabul qilinmasa yoki 45 daqiqadan ko'p yo'lda tursa, bot guruhdagi buyurtma xabariga javob qilib eslatma yozadi (har holat uchun bir marta). Daqiqalar sozlamalardan o'zgartiriladi, 0 yozilsa eslatma o'chadi.
+
+**Kunlik hisobot.** Kafe yopilgan zahoti (ish vaqti oxirida) o'sha ish kunining hisoboti guruhga keladi. Sozlamalardan adminlarga yuborish yoki o'chirish mumkin. Kecha-kunduz ishlaganda yarim tunda keladi.
+
+**Admin bo'limi.** Egasi, adminlar va xodimlar botga shaxsiy yozishmada `/start` yozadi:
 
 - **Menyu:** taom qo'shish, nomi, narxi, tavsifi, rasmi va kategoriyasini o'zgartirish, "tugadi" deb belgilash, o'chirish.
 - **Kategoriyalar:** qo'shish, nomini o'zgartirish, o'chirish.
-- **Sozlamalar:** yetkazish narxi, bepul yetkazish chegarasi, eng kam buyurtma, yetkazish masofasi, ish vaqti, kafe telefoni va joylashuvi.
-- **Bugungi hisobot:** nechta buyurtma, qanchasi yetkazildi va qancha summaga.
+- **Sozlamalar:** yetkazish narxi, bepul yetkazish chegarasi, eng kam buyurtma, yetkazish masofasi, ish vaqti, kafe telefoni va joylashuvi, kechikish eslatmasi, kunlik hisobot.
+- **Hisobot:** bugun, kecha, 7 kun, 30 kun va shu oy bo'yicha buyurtmalar, tushum, o'rtacha chek, oldingi davr bilan solishtirish, yangi va qaytgan mijozlar, eng band soat, ko'p sotilgan taomlar, rad etish sabablari.
 - **Buyurtma qabul qilishni to'xtatish/yoqish:** kafe band bo'lganda bitta tugma.
+- `/mijoz 901234567` (yoki `/mijoz 45`, buyurtma raqami bilan): mijoz kartasi. Buyurtmalari, jami xaridi, ko'p oladigan taomlari, soxta buyurtmalari va bloklash tugmasi.
 - `/blok 901234567` va `/ochish 901234567`: soxta buyurtma bergan raqamni bloklash.
+- **Adminlar va xodimlar:** bot bir martalik taklif havolasini beradi (24 soat amal qiladi), yangi odam uni bosib qo'shiladi. Egasi (`AMORA_ADMIN_IDS`) admin va xodim qo'sha oladi, admin faqat xodim. Xodim faqat taomni bor/tugadi qiladi, qabulni to'xtatadi, hisobot va mijoz kartasini ko'radi.
 
 ### Botni sozlash
 

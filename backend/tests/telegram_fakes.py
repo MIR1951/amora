@@ -11,6 +11,7 @@ from aiogram.methods import (
     EditMessageReplyMarkup,
     EditMessageText,
     GetFile,
+    GetMe,
     SendMessage,
     TelegramMethod,
 )
@@ -56,6 +57,8 @@ class FakeSession(BaseSession):
                 chat=Chat(id=method.chat_id, type="supergroup"),
                 text=method.text,
             )
+        if isinstance(method, GetMe):
+            return User(id=4242, is_bot=True, first_name="Amora", username="amora_test_bot")
         if isinstance(method, GetFile):
             return File(file_id=method.file_id, file_unique_id="unique", file_path="photos/a.jpg")
         return True

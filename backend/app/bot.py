@@ -12,8 +12,9 @@ from aiogram.types import BotCommand
 
 from app.config import Settings, get_settings
 from app.db import make_engine, make_session_factory
-from app.telegram import admin_router, common_router, orders_router
+from app.telegram import admin_router, common_router, insights_router, orders_router, team_router
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
+from app.telegram.watch import watch_forever
 
 log = logging.getLogger(__name__)
 
@@ -24,14 +25,20 @@ def build_dispatcher(cfg: Settings, session_factory: SessionFactory) -> Dispatch
     dispatcher["cfg"] = cfg
     dispatcher["session_factory"] = session_factory
     dispatcher.include_router(orders_router.router)
+    # Taklif havolasi /start bilan keladi: u boshqa /start'lardan oldin tekshiriladi
+    dispatcher.include_router(team_router.invite_router)
     # common admin'dan oldin turadi: aks holda adminning /id buyrug'i bosh menyuga tushib qoladi
     dispatcher.include_router(common_router.router)
+    dispatcher.include_router(insights_router.router)
+    dispatcher.include_router(team_router.router)
+    # admin oxirida: unda tushunarsiz xabarlarni ushlaydigan handler bor
     dispatcher.include_router(admin_router.router)
     return dispatcher
 
 
 COMMANDS = [
     BotCommand(command="start", description="Boshqaruv menyusi"),
+    BotCommand(command="mijoz", description="Mijoz kartasi: /mijoz 901234567"),
     BotCommand(command="help", description="Buyruqlar ro'yxati"),
     BotCommand(command="id", description="Chat va foydalanuvchi ID"),
 ]
@@ -126,6 +133,9 @@ async def main() -> None:
     else:
         log.warning("AMORA_ORDERS_CHAT_ID yozilmagan: buyurtmalar guruhga yuborilmaydi")
 
+    # Kechikkan buyurtmalar haqida eslatma va kunlik hisobot
+    watcher = asyncio.create_task(watch_forever(session_factory, bot, cfg))
+
     stop = asyncio.Event()
     install_stop_handlers(dispatcher, stop)
     commands_task = asyncio.create_task(set_commands_in_background(bot))
@@ -133,6 +143,7 @@ async def main() -> None:
         await poll_forever(dispatcher, bot, stop)
     finally:
         commands_task.cancel()
+        watcher.cancel()
         if sweeper is not None:
             sweeper.cancel()
         await bot.session.close()

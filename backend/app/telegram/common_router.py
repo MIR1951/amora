@@ -5,7 +5,7 @@ from aiogram.filters import JOIN_TRANSITION, ChatMemberUpdatedFilter, Command, C
 from aiogram.types import ChatMemberUpdated, Message
 
 from app.config import Settings
-from app.telegram.filters import IsAdmin
+from app.telegram.filters import HasAccess
 
 router = Router(name="common")
 
@@ -18,12 +18,12 @@ async def cmd_id(message: Message):
     await message.answer("\n".join(lines))
 
 
-@router.message(CommandStart(), F.chat.type == "private", ~IsAdmin())
+@router.message(CommandStart(), F.chat.type == "private", ~HasAccess())
 async def cmd_start_stranger(message: Message):
     await message.answer(
         "Bu bot Amora kafe xodimlari uchun.\n\n"
         f"Sizning Telegram ID raqamingiz: <code>{message.from_user.id}</code>\n"
-        "Admin bo'lish uchun shu raqamni bot egasiga yuboring."
+        "Admin yoki xodim bo'lish uchun bot egasidan taklif havolasini so'rang."
     )
 
 

@@ -246,8 +246,13 @@ async def create_order(
             {"total": quote.total},
         )
 
+    previous_orders = await session.scalar(
+        select(func.count()).select_from(Order).where(Order.phone == phone)
+    )
+
     order = Order(
         customer_id=customer_id,
+        customer_order_no=previous_orders + 1,
         client_order_id=client_order_id,
         status=OrderStatus.NEW.value,
         customer_name=name,
