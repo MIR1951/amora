@@ -14,6 +14,9 @@ name: iOS TestFlight
 
 on:
   workflow_dispatch:
+  # VAQTINCHALIK: PR #11 main'ga qo'shilishidan oldin workflow'ni sinash uchun. Merge'dan oldin olib tashlanadi.
+  push:
+    branches: [claude/project-thread-ca7vdl]
 
 permissions:
   contents: read
