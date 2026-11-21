@@ -34,6 +34,13 @@ class Settings(BaseSettings):
 
     # Firebase service account kaliti (JSON). Yozilmasa push-bildirishnomalar o'chiq
     firebase_credentials: Path | None = None
+    # iPhone push (APNs): .p8 kalit fayli, Key ID, Team ID. Yozilmasa iPhone'ga push o'chiq
+    apns_key: Path | None = None
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_topic: str = "uz.amora.app"
+    # Faqat Xcode'dan o'rnatilgan sinov ilovalari uchun true (TestFlight/App Store: false)
+    apns_sandbox: bool = False
 
     debug: bool = False
 
@@ -42,7 +49,7 @@ class Settings(BaseSettings):
     def _strip_slash(cls, value: str) -> str:
         return value.rstrip("/")
 
-    @field_validator("firebase_credentials", mode="before")
+    @field_validator("firebase_credentials", "apns_key", mode="before")
     @classmethod
     def _empty_path_to_none(cls, value):
         return None if value == "" else value

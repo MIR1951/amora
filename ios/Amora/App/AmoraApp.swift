@@ -7,6 +7,8 @@
 ///   Like Android onStart/onStop: a short `.inactive` (Control Center, notification shade) changes nothing.
 /// - Notifications: `NotificationDelegate` shows order notifications as banners while the app is open
 ///   and, when one is tapped, opens that order (`NotificationInbox` -> `Router.openOrderFromNotification`).
+///   APNs order pushes are not shown while the app is open (the live connection shows its own).
+/// - Push: `AppDelegate` registers for remote notifications and passes the APNs token to `PushTokenInbox`.
 ///
 /// Surface:
 /// - `@main struct AmoraApp: App`
@@ -84,7 +86,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        // APNs manzili ruxsatsiz ham beriladi: bildirishnoma ko'rinishi uchun ruxsat esa alohida so'raladi
+        // (OrderNotifier.askPermissionOnce). Manzil har ishga tushishda so'raladi: Apple uni almashtirishi mumkin.
+        application.registerForRemoteNotifications()
         return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let token = apnsTokenString(deviceToken)
+        Task { @MainActor in
+            PushTokenInbox.shared.receive(token)
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Simulyator yoki imzosiz yig'ish: push yo'q, ilova ochiq paytdagi bildirishnomalar ishlayveradi
     }
 }
 
@@ -114,6 +130,14 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        // Ilova ochiq: buyurtma holatini jonli ulanish o'zi ko'rsatadi (OrderNotifier). Serverdan kelgan
+        // xuddi shu xabar (APNs) ikkinchi marta chiqmasin. Aksiya xabari faqat push orqali keladi.
+        let content = notification.request.content
+        if notification.request.trigger is UNPushNotificationTrigger,
+           (content.userInfo["type"] as? String) == "order" {
+            completionHandler([])
+            return
+        }
         completionHandler([.banner, .list, .sound])
     }
 

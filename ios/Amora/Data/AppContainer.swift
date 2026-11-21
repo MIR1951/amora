@@ -73,6 +73,10 @@ final class AppContainer {
         self.push = push
         location = LocationFinder()
         push.start()
+        // Ilova delegati APNs'dan olgan qurilma manzili shu yerga keladi
+        PushTokenInbox.shared.attach { [weak push] token in
+            push?.onNewToken(token)
+        }
     }
 
     private static func resolveBaseUrl() -> String {

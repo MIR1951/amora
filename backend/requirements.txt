@@ -9,3 +9,5 @@ python-multipart>=0.0.9
 tzdata>=2024.1
 # Firebase push: Google kirish kalitini imzolash uchun
 pyjwt[crypto]>=2.8
+# iPhone push: APNs faqat HTTP/2 orqali ishlaydi
+httpx[http2]>=0.27
