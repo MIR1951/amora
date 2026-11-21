@@ -21,6 +21,7 @@ from app.telegram import (
     team_router,
     verify_router,
 )
+from app.services.apns import ApnsSender
 from app.services.push import PushSender
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
 from app.telegram.watch import watch_forever
@@ -135,7 +136,14 @@ async def main() -> None:
     engine = make_engine(cfg.database_url)
     session_factory = make_session_factory(engine)
     bot = make_bot(cfg.bot_token)
-    push = PushSender(cfg.firebase_credentials)
+    apns = ApnsSender(
+        cfg.apns_key,
+        key_id=cfg.apns_key_id,
+        team_id=cfg.apns_team_id,
+        topic=cfg.apns_topic,
+        sandbox=cfg.apns_sandbox,
+    )
+    push = PushSender(cfg.firebase_credentials, apns=apns)
     dispatcher = build_dispatcher(cfg, session_factory, push)
 
     if not cfg.admin_id_set:

@@ -1,9 +1,12 @@
-/// Push token flow (port of android data/Push.kt) kept as a stub: iOS has no Firebase yet, so nothing
-/// produces a token today. When APNs/FCM is added, call `onNewToken(_:)` with the device token and the
-/// existing flow sends it to the server (`PATCH /me {"fcm_token": ...}`) once the customer has an auth token,
-/// and re-sends it whenever the auth token changes.
+/// Push token flow (port of android data/Push.kt). iOS uses APNs directly (no Firebase SDK): the app delegate
+/// gets the APNs device token (hex) and hands it to `PushTokenInbox`, which forwards it to `PushTokens`.
+/// The token is sent to the server (`PATCH /me {"fcm_token": ...}`; the device is registered with
+/// platform "ios", so the server sends to APNs) once the customer has an auth token, and re-sent whenever
+/// the auth token changes. The server pushes order status and promo messages while the app is closed.
 ///
 /// Surface:
+/// - `@MainActor final class PushTokenInbox` (`static let shared`): `receive(_ token:)` from the app delegate,
+///   `attach(_ handler:)` from AppContainer (the last token received before attach is delivered then)
 /// - `@MainActor final class PushTokens`
 ///   - `init(api: ApiClient, session: SessionStore)`
 ///   - `func start()`                       // subscribe to auth-token changes (called by AppContainer)
@@ -75,4 +78,35 @@ final class PushTokens {
             // Keyingi safar (ilova qayta ochilganda yoki kalit yangilanganda) yana urinamiz
         }
     }
+}
+
+/// APNs qurilma manzili ilova delegatidan keladi, `AppContainer` esa SwiftUI tomonda yaratiladi:
+/// ular orasidagi ko'prik. Manzil container tayyor bo'lishidan oldin kelsa, saqlab turiladi.
+@MainActor
+final class PushTokenInbox {
+    static let shared = PushTokenInbox()
+
+    private var pending: String?
+    private var handler: ((String) -> Void)?
+
+    func receive(_ token: String) {
+        if let handler {
+            handler(token)
+        } else {
+            pending = token
+        }
+    }
+
+    func attach(_ handler: @escaping (String) -> Void) {
+        self.handler = handler
+        if let token = pending {
+            pending = nil
+            handler(token)
+        }
+    }
+}
+
+/// APNs qurilma manzili (32 bayt) serverga 64 belgili hex matn bo'lib boradi.
+func apnsTokenString(_ deviceToken: Data) -> String {
+    deviceToken.map { String(format: "%02x", $0) }.joined()
 }

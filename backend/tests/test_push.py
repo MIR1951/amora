@@ -3,15 +3,17 @@
 import asyncio
 import json
 
+import httpx
 import jwt
 import pytest
 from aiohttp import web
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from sqlalchemy import select
 
 from app.models import Customer, CustomerDevice
 from app.services import push as push_service
+from app.services.apns import ApnsError, ApnsSender
 from app.services.push import PushSender, broadcast_message, notify_order_status, order_message
 from tests.conftest import register
 from tests.telegram_fakes import GROUP_ID, STAFF
@@ -19,20 +21,31 @@ from tests.test_bot import db_order, place_order
 
 
 class FakePush(PushSender):
-    """Haqiqiy Firebase o'rniga: yuborilgan xabarlarni yozib boradi."""
+    """Haqiqiy Firebase va APNs o'rniga: yuborilgan xabarlarni yozib boradi."""
 
-    def __init__(self, result=None):
+    def __init__(self, result=None, apns_result=None, apns=True):
         super().__init__(None)
         self.sent: list[dict] = []
+        self.apns_sent: list[tuple[str, dict, dict]] = []
         self.result = result
+        self.apns_result = apns_result
+        self._apns_on = apns
 
     @property
-    def enabled(self) -> bool:
+    def fcm_enabled(self) -> bool:
         return True
+
+    @property
+    def apns_enabled(self) -> bool:
+        return self._apns_on
 
     async def send(self, message: dict):
         self.sent.append(message)
         return self.result
+
+    async def send_apns(self, device_token: str, payload: dict, **options):
+        self.apns_sent.append((device_token, payload, options))
+        return self.apns_result
 
 
 # ---------- Xabar ko'rinishi ----------
@@ -345,3 +358,184 @@ async def test_double_tap_on_send_is_answered_once_sent_once(driver, seed, tg):
     answers = [answer.text for answer in tg.of_type(AnswerCallbackQuery)]
     assert len(answers) == 2
     assert any("Xabar yuborildi" in text for text in answers)
+
+
+# ---------- iPhone: APNs ----------
+
+IOS_TOKEN = "ab" * 32
+IOS_TOKEN_2 = "cd" * 32
+
+
+def _apns_key(tmp_path):
+    key = ec.generate_private_key(ec.SECP256R1())
+    path = tmp_path / "apns.p8"
+    path.write_bytes(
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    )
+    return key, path
+
+
+@pytest.fixture
+def apns(tmp_path):
+    """APNs o'rniga httpx MockTransport: so'rovlarni yozib boradi, javobni sinov tanlaydi."""
+    key, path = _apns_key(tmp_path)
+    state = {"requests": [], "responses": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        claims = jwt.decode(
+            request.headers["authorization"].removeprefix("bearer "), key.public_key(), algorithms=["ES256"]
+        )
+        assert claims["iss"] == "TEAM123456"
+        assert jwt.get_unverified_header(request.headers["authorization"][7:])["kid"] == "KEY1234567"
+        state["requests"].append(
+            {"url": str(request.url), "headers": dict(request.headers), "body": json.loads(request.content)}
+        )
+        if state["responses"]:
+            status, body = state["responses"].pop(0)
+            return httpx.Response(status, json=body)
+        return httpx.Response(200)
+
+    sender = ApnsSender(
+        path, key_id="KEY1234567", team_id="TEAM123456", transport=httpx.MockTransport(handler)
+    )
+    state["sender"] = sender
+    return state
+
+
+async def test_apns_sends_alert_with_headers(apns):
+    sender = apns["sender"]
+    assert sender.enabled
+    payload = {"aps": {"alert": {"title": "Salom", "body": "Matn"}}}
+    assert await sender.send(IOS_TOKEN, payload, collapse_id="order-7") is None
+    request = apns["requests"][0]
+    assert request["url"] == f"https://api.push.apple.com/3/device/{IOS_TOKEN}"
+    assert request["headers"]["apns-topic"] == "uz.amora.app"
+    assert request["headers"]["apns-push-type"] == "alert"
+    assert request["headers"]["apns-collapse-id"] == "order-7"
+    assert request["body"] == payload
+    await sender.send(IOS_TOKEN, payload)
+    # Kalit (JWT) har so'rovda qayta imzolanmaydi
+    assert apns["requests"][0]["headers"]["authorization"] == apns["requests"][1]["headers"]["authorization"]
+
+
+async def test_apns_dead_and_error_answers(apns):
+    sender = apns["sender"]
+    apns["responses"] = [
+        (410, {"reason": "Unregistered"}),
+        (400, {"reason": "BadDeviceToken"}),
+        (400, {"reason": "DeviceTokenNotForTopic"}),
+        (500, {"reason": "InternalServerError"}),
+    ]
+    assert await sender.send(IOS_TOKEN, {}) == "dead"
+    assert await sender.send(IOS_TOKEN, {}) == "dead"
+    with pytest.raises(ApnsError, match="DeviceTokenNotForTopic"):
+        await sender.send(IOS_TOKEN, {})  # sozlama xatosi: manzillar o'chirilmaydi
+    with pytest.raises(ApnsError):
+        await sender.send(IOS_TOKEN, {})
+
+
+async def test_apns_expired_token_is_renewed_once(apns):
+    apns["responses"] = [(403, {"reason": "ExpiredProviderToken"})]
+    assert await apns["sender"].send(IOS_TOKEN, {}) is None
+    assert len(apns["requests"]) == 2
+
+
+def test_apns_missing_or_broken_key(tmp_path, caplog):
+    assert not ApnsSender(None).enabled
+    assert not ApnsSender(tmp_path / "yoq.p8", key_id="K", team_id="T").enabled
+    assert "APNs kaliti o'qilmadi" not in caplog.text  # kalit hali qo'yilmagan: xato emas
+    broken = tmp_path / "broken.p8"
+    broken.write_text("-----BEGIN PRIVATE KEY-----\nbuzuq\n-----END PRIVATE KEY-----\n")
+    assert not ApnsSender(broken, key_id="K", team_id="T").enabled
+    _, good = _apns_key(tmp_path)
+    assert not ApnsSender(good).enabled  # Key ID / Team ID yozilmagan
+    assert "APNs kaliti o'qilmadi" in caplog.text
+
+
+def test_apns_order_payload_texts():
+    from app.models import Order
+
+    payload = push_service.apns_order_payload(Order(id=7, status="rejected", reject_reason="Taom tugagan"))
+    assert payload["aps"]["alert"] == {"title": "Buyurtma №7 rad etildi", "body": "Sabab: Taom tugagan"}
+    assert payload["type"] == "order" and payload["order_id"] == 7
+    assert push_service.apns_order_payload(Order(id=7, status="new")) is None
+
+
+async def _set_platform(session_factory, token: str, platform: str | None):
+    async with session_factory() as session:
+        device = await session.scalar(select(CustomerDevice).where(CustomerDevice.fcm_token == token))
+        device.platform = platform
+        await session.commit()
+
+
+async def test_order_status_goes_to_apns_for_iphone(api, seed, session_factory):
+    from app.models import OrderStatus
+    from app.services.orders import set_status_by_staff
+    from tests.conftest import verify_phone
+
+    fake = FakePush()
+    order, android = await place_order(api, seed)
+    iphone = await verify_phone(api, "90 123 45 67")
+    await api.patch("/me", headers=android, json={"fcm_token": "android-token"})
+    await api.patch("/me", headers=iphone, json={"fcm_token": IOS_TOKEN})
+    await _set_platform(session_factory, IOS_TOKEN, "ios")
+    async with session_factory() as session:
+        await set_status_by_staff(session, order["id"], OrderStatus.ACCEPTED, "Kassir")
+    async with session_factory() as session:
+        await set_status_by_staff(session, order["id"], OrderStatus.DELIVERING, "Kassir")
+    assert await notify_order_status(fake, session_factory, order["id"]) is True
+    assert [m["token"] for m in fake.sent] == ["android-token"]
+    [(token, payload, options)] = fake.apns_sent
+    assert token == IOS_TOKEN
+    assert payload["aps"]["alert"]["title"] == "Kuryer yo'lda"
+    assert options["collapse_id"] == f"order-{order['id']}"
+
+    # iPhone ilovasi o'chirildi: manzil bazadan o'chiriladi
+    fake.apns_result = "dead"
+    await notify_order_status(fake, session_factory, order["id"])
+    async with session_factory() as session:
+        tokens = set((await session.scalars(select(CustomerDevice.fcm_token))).all())
+    assert tokens == {"android-token", None}
+
+
+async def test_hex_token_without_platform_counts_as_iphone(api, seed, session_factory):
+    from app.models import OrderStatus
+    from app.services.orders import set_status_by_staff
+
+    fake = FakePush()
+    order, auth = await place_order(api, seed)
+    await api.patch("/me", headers=auth, json={"fcm_token": IOS_TOKEN})
+    await _set_platform(session_factory, IOS_TOKEN, None)
+    async with session_factory() as session:
+        await set_status_by_staff(session, order["id"], OrderStatus.ACCEPTED, "Kassir")
+    await notify_order_status(fake, session_factory, order["id"])
+    assert fake.sent == [] and len(fake.apns_sent) == 1
+
+    # APNs kaliti yo'q: iPhone'ga hech narsa ketmaydi, Android tokeni sifatida ham yuborilmaydi
+    off = FakePush(apns=False)
+    await notify_order_status(off, session_factory, order["id"])
+    assert off.sent == [] and off.apns_sent == []
+
+
+async def test_broadcast_reaches_android_topic_and_every_iphone(api, seed, session_factory):
+    from tests.conftest import verify_phone
+
+    fake = FakePush()
+    _, first = await place_order(api, seed)
+    second = await verify_phone(api, "90 123 45 67")
+    await api.patch("/me", headers=first, json={"fcm_token": IOS_TOKEN})
+    await api.patch("/me", headers=second, json={"fcm_token": IOS_TOKEN_2})
+    await _set_platform(session_factory, IOS_TOKEN, "ios")
+    await _set_platform(session_factory, IOS_TOKEN_2, "ios")
+    await push_service.broadcast(fake, "Bugun −20%", "Promokod", session_factory)
+    assert fake.sent[0]["topic"] == "all"
+    assert sorted(token for token, _, _ in fake.apns_sent) == sorted([IOS_TOKEN, IOS_TOKEN_2])
+    assert fake.apns_sent[0][1]["aps"]["alert"] == {"title": "Bugun −20%", "body": "Promokod"}
+
+    # Firebase ishlamadi, lekin iPhone'larga yetdi: admin xato ko'rmaydi
+    failing = FakePush(result="disabled")
+    await push_service.broadcast(failing, "Salom", "Matn", session_factory)
+    # Hech kimga yetmadi: xato
+    nobody = FakePush(result="disabled", apns_result="dead")
+    with pytest.raises(push_service.PushError):
+        await push_service.broadcast(nobody, "Salom", "Matn", session_factory)

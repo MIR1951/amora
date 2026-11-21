@@ -15,7 +15,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.1.0
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: 1
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
@@ -42,11 +42,24 @@ targets:
       base:
         PRODUCT_NAME: Amora
         PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app
+        # Faqat iPhone. XcodeGen ilova uchun standart "1,2" (iPhone+iPad) qo'yadi va u loyiha darajasidagi
+        # qiymatni bosib ketadi: iPad bo'lsa Apple faqat portret yo'nalishli ilovani qabul qilmaydi
+        TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         # Server manzili. CI sinov yig'ishida: AMORA_API_BASE_URL=http://127.0.0.1:8000
         AMORA_API_BASE_URL: https://amora.mirjoy.uz
         SWIFT_EMIT_LOC_STRINGS: NO
+      configs:
+        # Push (APNs): Debug Xcode'dan o'rnatilganda sinov serveri, TestFlight/App Store'da asosiy server
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
+    entitlements:
+      path: Amora/Resources/Amora.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
     info:
       path: Amora/Resources/Info.plist
       properties:
@@ -76,6 +89,9 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSupportsIndirectInputEvents: true
         ITSAppUsesNonExemptEncryption: false
+        # Xcode 26 (iOS 26 SDK) bilan yig'ilganda tizim elementlari (alert, klaviatura paneli)
+        # o'zgarmasin: ilovaning o'z "shisha" dizayni bor va u sinovdan o'tgan ko'rinishda qoladi
+        UIDesignRequiresCompatibility: true
 
   AmoraUITests:
     type: bundle.ui-testing

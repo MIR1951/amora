@@ -441,7 +441,7 @@ async def msg_add_audience(message: Message):
 async def cb_broadcast(callback: CallbackQuery, state: FSMContext, push: PushSender):
     if not push.enabled:
         await callback.answer(
-            "Bildirishnomalar hali sozlanmagan: serverda Firebase kaliti yo'q", show_alert=True
+            "Bildirishnomalar hali sozlanmagan: serverda Firebase va APNs kalitlari yo'q", show_alert=True
         )
         return
     await state.clear()
@@ -498,7 +498,7 @@ async def cb_broadcast_send(
         await cb_broadcast_stale(callback, session_factory)
         return
     try:
-        await broadcast(push, title, text)
+        await broadcast(push, title, text, session_factory)
     except PushError as error:
         log.warning("Xabar yuborilmadi: %s", error)
         async with session_factory() as session:

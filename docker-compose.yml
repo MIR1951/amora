@@ -43,6 +43,8 @@ services:
       AMORA_MEDIA_DIR: /srv/amora/media
       # Firebase kaliti: serverda ~/amora/secrets/firebase.json. Fayl bo'lmasa push o'chiq
       AMORA_FIREBASE_CREDENTIALS: /srv/amora/secrets/firebase.json
+      # iPhone push kaliti: serverda ~/amora/secrets/apns.p8 (Key ID va Team ID .env da). Fayl bo'lmasa o'chiq
+      AMORA_APNS_KEY: /srv/amora/secrets/apns.p8
     volumes:
       # Bot saqlagan taom rasmlarini api shu yerdan tarqatadi
       - media:/srv/amora/media

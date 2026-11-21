@@ -126,6 +126,8 @@ git pull && docker compose up -d --build
 
 **Push-bildirishnomalar (Firebase).** Firebase konsolidagi *Project settings → Service accounts → Generate new private key* faylini serverga `~/amora/secrets/firebase.json` qilib qo'ying (bu papka GitHub'ga yuklanmaydi). Bot uni o'zi topadi. Fayl yo'q bo'lsa push o'chiq, qolgan hamma narsa ishlaydi. Tekshirish: `docker compose logs bot | grep -i firebase`. "o'qilmadi" chiqsa, `chmod 644 ~/amora/secrets/firebase.json` qilib, `docker compose up -d` ni qayta ishga tushiring. Ilova tomoni `android/app/google-services.json` dan sozlanadi (u maxfiy emas).
 
+**iPhone push (APNs).** iPhone'ga xabar Firebase'siz, to'g'ridan-to'g'ri Apple'ga yuboriladi. Apple Developer → Keys'da "Apple Push Notifications service" kaliti (`.p8`) yarating va serverga `~/amora/secrets/apns.p8` qilib qo'ying (`chmod 644`). `.env` ga `AMORA_APNS_KEY_ID=<kalitning Key ID si>` va `AMORA_APNS_TEAM_ID=<Team ID>` yozing, so'ng `docker compose up -d`. Tekshirish: `docker compose logs bot | grep -i apns`. Fayl yo'q bo'lsa iPhone'ga push o'chiq, qolgani ishlaydi. TestFlight va App Store ilovalari asosiy APNs serveridan oladi; Xcode'dan o'rnatilgan sinov ilovasi uchun `AMORA_APNS_SANDBOX=true`.
+
 ## Kompyuterda ishga tushirish va testlar
 
 ```bash
