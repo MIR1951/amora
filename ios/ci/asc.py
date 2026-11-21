@@ -204,7 +204,8 @@ def ensure_bundle_id(client: Client, identifier: str) -> dict:
             "/bundleIds",
             {"data": {"type": "bundleIds", "attributes": {"identifier": identifier, "name": "Amora", "platform": "IOS"}}},
         )["data"]
-    capabilities = client.get_all(f"/bundleIds/{bundle['id']}/bundleIdCapabilities")
+    # Bu bog'lanish "limit" parametrini qabul qilmaydi: oddiy so'rov
+    capabilities = client.request("GET", f"/bundleIds/{bundle['id']}/bundleIdCapabilities").get("data", [])
     kinds = {item["attributes"]["capabilityType"] for item in capabilities}
     if "PUSH_NOTIFICATIONS" not in kinds:
         print("Push Notifications imkoniyati yoqilmoqda")
