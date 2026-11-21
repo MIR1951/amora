@@ -111,29 +111,46 @@ xcodebuild test -project ios/Amora.xcodeproj -scheme Amora \
   -only-testing:AmoraUITests AMORA_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-## Keyingi qadam: haqiqiy iPhone va TestFlight
+## TestFlight'ga yuklash (haqiqiy iPhone)
 
-Hozircha CI imzosiz (`CODE_SIGNING_ALLOWED=NO`) faqat simulyator uchun yig'adi. Ilovani haqiqiy
-iPhone'larga TestFlight orqali tarqatish uchun:
+`.github/workflows/ios-testflight.yml` imzolangan ilovani yig'ib, App Store Connect'ga yuklaydi.
+Mac kerak emas. Faqat qo'lda ishga tushadi: GitHub → Actions → **iOS TestFlight** → **Run workflow**.
 
-1. **Apple Developer Program** a'zoligi (yiliga 99 $) — kafe nomidan (tashkilot) yoki shaxsiy hisob.
-   Tashkilot uchun D-U-N-S raqami kerak bo'ladi.
-2. **App Store Connect**'da yangi ilova yaratish: bundle id `uz.amora.app`, nomi `Amora`.
-3. `project.yml` da `DEVELOPMENT_TEAM` ga jamoa ID'sini yozish (bu maxfiy emas).
-4. **App Store Connect API kaliti**: App Store Connect → Users and Access → Integrations →
-   App Store Connect API → yangi kalit ("App Manager" roli). Yuklab olingan `.p8` fayl faqat bir marta
-   beriladi.
-5. Kalitni **faqat GitHub Secrets**'ga qo'yish (Settings → Secrets and variables → Actions):
-   `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_P8`
-   (fayl matni yoki base64). Kalitni, sertifikatni yoki parollarni hech qachon chatga, issue'ga,
-   commit'ga yoki jurnalga yozmang: kim ko'rsa, ilovangiz nomidan yangi versiya chiqara oladi.
-6. Workflow'ga alohida "TestFlight" ishini qo'shish: `xcodebuild archive` (Release, `generic/platform=iOS`,
-   `-allowProvisioningUpdates` va API kaliti bilan avtomatik imzolash), `xcodebuild -exportArchive`
-   (`method: app-store-connect`) va `xcrun altool --upload-app` bilan App Store Connect'ga yuklash.
-   Kalit ish ichida secrets'dan vaqtinchalik faylga yoziladi va ish tugashi bilan o'chiriladi.
-   Har yig'ishda `CURRENT_PROJECT_VERSION` = GitHub run raqami, shuning uchun versiyalar o'z-o'zidan o'sib boradi.
-7. Push-bildirishnomalar (ilova yopiq paytda ham) uchun Apple Push Notification kaliti (`.p8`) kerak bo'ladi:
-   u ham faqat server sozlamalarida yoki GitHub Secrets'da saqlanadi.
+### Bir martalik tayyorgarlik
 
-TestFlight'ga birinchi yuklashdan keyin Apple ilovani bir-ikki kun ichida tekshiradi, so'ng sinovchilarni
-email orqali taklif qilish mumkin.
+1. developer.apple.com → Identifiers: App ID `uz.amora.app`, **Push Notifications** yoqilgan
+   (yo'q bo'lsa, workflow o'zi yaratadi va push'ni yoqadi).
+2. appstoreconnect.apple.com → Apps → **+** → New App: Bundle ID `uz.amora.app`, SKU `amora-ios`.
+3. App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys → **+**,
+   Access: **Admin** (sertifikat va profil yaratish uchun kerak). `.p8` faqat bir marta yuklanadi.
+4. GitHub → Settings → Secrets and variables → Actions → **New repository secret**:
+   - `APPLE_TEAM_ID`: Team ID (developer.apple.com → Membership, 10 belgi)
+   - `ASC_KEY_ID`: API kalitining Key ID si
+   - `ASC_ISSUER_ID`: Issuer ID (API kalitlari sahifasining tepasida)
+   - `ASC_KEY_P8`: `.p8` faylning to'liq matni, BEGIN/END qatorlari bilan
+
+   Kalitni hech qachon chatga, issue'ga, commit'ga yozmang: kim ko'rsa, ilova nomidan versiya chiqara oladi.
+   Repo ochiq bo'lsa ham sirlar boshqalarga ko'rinmaydi va begona PR'larga berilmaydi.
+
+### Workflow nima qiladi
+
+1. `ios/ci/asc.py check`: kalitni tekshiradi, bundle ID va push imkoniyatini, ilova yozuvini topadi,
+   yangi build raqamini tanlaydi (avval yuklanganlarning eng kattasidan +1, kamida run raqami).
+2. Xcode 26 tanlanadi (App Store 2026 aprelidan iOS 26 SDK talab qiladi), `xcodegen generate`.
+3. `asc.py signing`: runner ichida yangi kalit yaratib, App Store Connect API orqali vaqtinchalik
+   **Apple Distribution** sertifikati va **App Store** profili ("Amora CI <run id>") oladi. Kalit faqat
+   vaqtinchalik keychain'da turadi.
+4. `xcodebuild archive` (Release, qo'lda imzo), so'ng tekshiruv: server manzili `https://amora.mirjoy.uz`,
+   build raqami to'g'ri, `aps-environment = production`.
+5. `xcodebuild -exportArchive` (`app-store-connect`) → `.ipa`, `xcrun altool --upload-app` bilan yuklash.
+6. Har doim (xato bo'lsa ham) `asc.py cleanup`: vaqtinchalik sertifikat va profil o'chiriladi,
+   keychain va kalit fayli o'chiriladi. Akkauntdagi boshqa sertifikatlarga tegilmaydi. Apple TestFlight va
+   App Store ilovalarini o'zi qayta imzolaydi, shuning uchun sertifikatni o'chirish yuklangan build'ga ta'sir qilmaydi.
+
+Yuklangandan keyin Apple build'ni 5–30 daqiqada qayta ishlaydi va u App Store Connect → TestFlight'da
+ko'rinadi. **Internal Testing** guruhiga jamoa a'zolarini qo'shsangiz, ular iPhone'dagi TestFlight ilovasi
+orqali darhol o'rnatadi (Apple tekshiruvisiz). Jamoadan tashqaridagilar (External Testing) uchun birinchi
+build Apple'ning qisqa beta tekshiruvidan o'tadi.
+
+Agar akkauntda Apple Distribution sertifikatlari chegarasi to'lgan bo'lsa (3 ta), workflow buni aytib to'xtaydi:
+developer.apple.com → Certificates bo'limida keraksizini o'chirish kerak.

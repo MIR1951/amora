@@ -55,21 +55,11 @@ jobs:
             echo "DERIVED=$RUNNER_TEMP/dd"
           } >> "$GITHUB_ENV"
 
-      # Runner'da bir nechta Xcode bor: 16.x ning eng yangisi tanlanadi
-      - name: Xcode 16 ni tanlash
-        run: |
-          ls /Applications | grep Xcode || true
-          XCODE=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | grep -E 'Xcode_16(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)
-          if [ -z "$XCODE" ]; then
-            XCODE=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -n 1 || true)
-          fi
-          if [ -z "$XCODE" ]; then
-            echo "Xcode 16 topilmadi"
-            exit 1
-          fi
-          echo "Tanlandi: $XCODE"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
-          xcodebuild -version
+      # Runner'da bir nechta Xcode bor: 26.x ning eng yangisi tanlanadi. App Store 2026 yil
+      # aprelidan faqat iOS 26 SDK (Xcode 26) bilan yig'ilgan ilovani qabul qiladi, TestFlight
+      # workflow'i ham shu Xcode'ni oladi: sinalgan va yuklangan ilova bir xil yig'iladi.
+      - name: Xcode 26 ni tanlash
+        run: bash ios/ci/select_xcode.sh
 
       - name: Xcode loyihasini yaratish (XcodeGen)
         run: |

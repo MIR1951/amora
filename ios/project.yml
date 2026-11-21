@@ -47,6 +47,16 @@ targets:
         # Server manzili. CI sinov yig'ishida: AMORA_API_BASE_URL=http://127.0.0.1:8000
         AMORA_API_BASE_URL: https://amora.mirjoy.uz
         SWIFT_EMIT_LOC_STRINGS: NO
+      configs:
+        # Push (APNs): Debug Xcode'dan o'rnatilganda sinov serveri, TestFlight/App Store'da asosiy server
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
+    entitlements:
+      path: Amora/Resources/Amora.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
     info:
       path: Amora/Resources/Info.plist
       properties:
@@ -76,6 +86,9 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSupportsIndirectInputEvents: true
         ITSAppUsesNonExemptEncryption: false
+        # Xcode 26 (iOS 26 SDK) bilan yig'ilganda tizim elementlari (alert, klaviatura paneli)
+        # o'zgarmasin: ilovaning o'z "shisha" dizayni bor va u sinovdan o'tgan ko'rinishda qoladi
+        UIDesignRequiresCompatibility: true
 
   AmoraUITests:
     type: bundle.ui-testing
