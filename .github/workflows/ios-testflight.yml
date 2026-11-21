@@ -153,6 +153,9 @@ jobs:
           # TestFlight'ga faqat haqiqiy serverga qaragan, push'li ilova chiqadi
           test "$(/usr/libexec/PlistBuddy -c "Print :AmoraApiBaseUrl" "$APP/Info.plist")" = "https://amora.mirjoy.uz"
           test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")" = "$BUILD_NUMBER"
+          # Faqat iPhone (UIDeviceFamily = [1])
+          test "$(/usr/libexec/PlistBuddy -c "Print :UIDeviceFamily:0" "$APP/Info.plist")" = "1"
+          ! /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily:1" "$APP/Info.plist" 2>/dev/null
           codesign -d --entitlements - --xml "$APP" > "$LOGS/entitlements.plist" 2>/dev/null
           cat "$LOGS/entitlements.plist"
           test "$(/usr/libexec/PlistBuddy -c "Print :aps-environment" "$LOGS/entitlements.plist")" = "production"

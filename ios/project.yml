@@ -42,6 +42,9 @@ targets:
       base:
         PRODUCT_NAME: Amora
         PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app
+        # Faqat iPhone. XcodeGen ilova uchun standart "1,2" (iPhone+iPad) qo'yadi va u loyiha darajasidagi
+        # qiymatni bosib ketadi: iPad bo'lsa Apple faqat portret yo'nalishli ilovani qabul qilmaydi
+        TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         # Server manzili. CI sinov yig'ishida: AMORA_API_BASE_URL=http://127.0.0.1:8000
