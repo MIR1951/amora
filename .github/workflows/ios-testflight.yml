@@ -155,7 +155,9 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")" = "$BUILD_NUMBER"
           # Faqat iPhone (UIDeviceFamily = [1])
           test "$(/usr/libexec/PlistBuddy -c "Print :UIDeviceFamily:0" "$APP/Info.plist")" = "1"
-          ! /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily:1" "$APP/Info.plist" 2>/dev/null
+          if /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily:1" "$APP/Info.plist" 2>/dev/null; then
+            echo "::error::Ilova iPad uchun ham yig'ilgan (TARGETED_DEVICE_FAMILY)"; exit 1
+          fi
           codesign -d --entitlements - --xml "$APP" > "$LOGS/entitlements.plist" 2>/dev/null
           cat "$LOGS/entitlements.plist"
           test "$(/usr/libexec/PlistBuddy -c "Print :aps-environment" "$LOGS/entitlements.plist")" = "production"
