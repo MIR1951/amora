@@ -57,14 +57,12 @@ class Client:
         self.key_id = key_id
         self.issuer_id = issuer_id
         try:
-            self.private_key = key_path.read_text(encoding="utf-8")
+            raw = key_path.read_text(encoding="utf-8")
         except OSError as error:
             raise AscError(f"API kaliti fayli o'qilmadi: {error}") from error
-        if "BEGIN PRIVATE KEY" not in self.private_key:
-            raise AscError(
-                "ASC_KEY_P8 siri .p8 fayl emas: Notepad'da ochib, BEGIN va END qatorlari bilan "
-                "birga hammasini nusxa qiling"
-            )
+        self.private_key = normalize_p8(raw)
+        # altool ham shu fayldan o'qiydi: tuzatilgan ko'rinishini qayta yozamiz
+        key_path.write_text(self.private_key, encoding="utf-8")
         self._token = ""
         self._token_expires = 0.0
 
@@ -120,6 +118,36 @@ class Client:
             if not next_url:
                 return result
             page = self.request("GET", next_url)
+
+
+def normalize_p8(raw: str) -> str:
+    """Sirga .p8 turli ko'rinishda qo'yilishi mumkin: to'liq fayl, BEGIN/END qatorlarisiz faqat
+    o'rtasi, butun faylning base64 ko'rinishi yoki "\\n" bilan bitta qator. Hammasini PEM ga keltiradi.
+    Kalit matni jurnalga hech qachon chiqmaydi."""
+    text = raw.strip().strip('"').strip("'").replace("\\n", "\n").replace("\r", "")
+    if "BEGIN PRIVATE KEY" in text:
+        return text + "\n"
+    compact = "".join(text.split())
+    try:
+        decoded = base64.b64decode(compact, validate=True)
+    except ValueError:
+        decoded = b""
+    if b"BEGIN PRIVATE KEY" in decoded:
+        return decoded.decode("utf-8", "replace").strip() + "\n"
+    if decoded:
+        try:
+            serialization.load_der_private_key(decoded, password=None)
+            body = "\n".join(compact[i : i + 64] for i in range(0, len(compact), 64))
+            return f"-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----\n"
+        except (ValueError, TypeError):
+            pass
+    raise AscError(
+        "ASC_KEY_P8 siri .p8 kalit emas (uzunligi "
+        f"{len(text)} belgi, to'g'ri kalit ~250 belgi bo'ladi). App Store Connect API sahifasidan "
+        "yuklangan AuthKey_XXXX.p8 faylni Notepad'da oching va BEGIN/END qatorlari bilan birga "
+        "hammasini nusxa qilib, sirni qayta saqlang. Key ID, Issuer ID yoki push kaliti (Amora Push) "
+        "emas, aynan API kaliti fayli kerak"
+    )
 
 
 def _explain(status: int, method: str, path: str, text: str) -> str:
