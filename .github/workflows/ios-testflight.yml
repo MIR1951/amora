@@ -28,11 +28,24 @@ env:
 jobs:
   upload:
     name: Yig'ish, imzolash va TestFlight'ga yuklash
-    if: github.repository == 'MIR1951/amora'
+    # Faqat main shoxidan: boshqa shoxdagi o'zgartirilgan skript sirlarni ishlata olmasin
+    if: github.repository == 'MIR1951/amora' && github.ref == 'refs/heads/main'
+    # Sirlarni shu muhitga ko'chirib, unga tasdiqlovchi qo'yish mumkin:
+    # Settings → Environments → testflight → Required reviewers
+    environment: testflight
     runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      # Kutubxonalar App Store Connect kaliti diskka yozilishidan OLDIN va qulflangan versiyalarda
+      # (xeshlari bilan) o'rnatiladi: begona paket kalitni o'qiy olmasligi kerak
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Python kutubxonalari (pyjwt va cryptography shu ro'yxat ichida)
+        run: pip install --require-hashes -r backend/requirements.lock
 
       - name: Sirlarni tekshirish
         env:
@@ -67,13 +80,6 @@ jobs:
           echo "SIGNING=$RUNNER_TEMP/signing" >> "$GITHUB_ENV"
           echo "LOGS=$RUNNER_TEMP/logs" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/logs"
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Python kutubxonalari
-        run: pip install "pyjwt[crypto]>=2.8"
 
       - name: App Store Connect'ni tekshirish (bundle ID, push, ilova yozuvi)
         id: check

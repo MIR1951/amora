@@ -12,3 +12,4 @@ media/
 .ruff_cache/
 # Serverning o'ziga xos sozlamasi (masalan, umumiy Caddy tarmog'iga ulash)
 docker-compose.override.yml
+backups/

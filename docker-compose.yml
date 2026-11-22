@@ -1,4 +1,12 @@
 # Ishga tushirish:  docker compose up -d --build
+
+# Jurnallar cheklangan: aks holda ular diskni to'ldirib, PostgreSQL'ni to'xtatib qo'yadi
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
@@ -14,9 +22,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    logging: *logging
 
   api:
     build: ./backend
+    image: amora-backend
     restart: unless-stopped
     depends_on:
       db:
@@ -30,13 +40,22 @@ services:
     ports:
       # Faqat serverning o'zidan ochiq: tashqariga nginx orqali HTTPS bilan chiqariladi
       - "127.0.0.1:8000:8000"
+    # Sog'lom = baza sxemasi yangilangan va server javob beryapti (bot shuni kutadi)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    logging: *logging
 
   bot:
-    build: ./backend
+    # api bilan bitta image: ikki marta yig'ilmaydi
+    image: amora-backend
     restart: unless-stopped
     depends_on:
       api:
-        condition: service_started  # baza jadvallarini api yaratadi
+        condition: service_healthy  # baza sxemasini api yangilaydi: bot eski sxemada ishlamasin
     env_file: .env
     environment:
       AMORA_DATABASE_URL: postgresql+asyncpg://amora:${POSTGRES_PASSWORD}@db:5432/amora
@@ -50,6 +69,15 @@ services:
       - media:/srv/amora/media
       - ./secrets:/srv/amora/secrets:ro
     command: ["python", "-m", "app.bot"]
+    # Bot har 30 soniyada /tmp/amora-bot-heartbeat faylini yangilaydi. 3 daqiqa yangilanmasa,
+    # `docker compose ps` uni "unhealthy" deb ko'rsatadi
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/amora-bot-heartbeat') > 180)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging: *logging
 
 volumes:
   pgdata:

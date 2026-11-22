@@ -26,9 +26,17 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements.lock
+            backend/requirements-dev.txt
+      # Avval serverdagi bilan aynan bir xil versiyalar (xeshlari bilan), keyin test vositalari
+      - run: pip install --require-hashes -r requirements.lock
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+      - name: Kod tekshiruvi (ruff)
+        run: |
+          pip install "ruff==0.17.6"
+          ruff check .
 
   # Xuddi shu testlar haqiqiy PostgreSQL'da: jonli yangilanishlar (NOTIFY/LISTEN) faqat shu yerda
   # to'liq tekshiriladi, serverda ham aynan PostgreSQL ishlaydi.
@@ -59,6 +67,28 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements.lock
+            backend/requirements-dev.txt
+      # Avval serverdagi bilan aynan bir xil versiyalar (xeshlari bilan), keyin test vositalari
+      - run: pip install --require-hashes -r requirements.lock
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+      # Migratsiyalar alohida, toza bazada: testlar jadvallarni modeldan yaratadi, shuning uchun
+      # yetishmayotgan yoki xato migratsiyani faqat shu qadam ushlaydi
+      - name: Migratsiyalar modelga mosligi
+        env:
+          PGPASSWORD: amora
+          AMORA_DATABASE_URL: postgresql+asyncpg://amora:amora@localhost:5432/amora_migrations
+        run: |
+          psql -h localhost -U amora -d amora_test -c "CREATE DATABASE amora_migrations"
+          alembic upgrade head
+          alembic check
+
+  # Serverga qo'yiladigan image yig'ilishini tekshiradi (buzilgan Dockerfile serverda emas, shu yerda chiqadi)
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t amora-backend backend
+      - run: docker run --rm amora-backend python -c "import app.main, app.bot, app.menu_content"
