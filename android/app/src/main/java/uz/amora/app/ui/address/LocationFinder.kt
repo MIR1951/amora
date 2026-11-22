@@ -61,17 +61,39 @@ class LocationFinder(context: Context) {
         return best
     }
 
-    /** Hozirgi joylashuv. Belgilangan vaqt ichida aniqlanmasa null. */
+    /**
+     * Hozirgi joylashuv. Birinchi kelgan o'lchov ko'pincha noaniq (tarmoq orqali, yuzlab metr):
+     * aniqligi [GOOD_ACCURACY_METERS] dan yaxshi o'lchov kelguncha yoki vaqt tugaguncha kutiladi va
+     * ko'rilganlarning eng aniqi qaytadi. Hech narsa aniqlanmasa null.
+     * [onImproved]: har safar avvalgisidan aniqroq o'lchov kelganda chaqiriladi.
+     */
     @SuppressLint("MissingPermission")
-    suspend fun current(timeoutMillis: Long = 15_000L): Location? {
+    suspend fun current(
+        timeoutMillis: Long = 15_000L,
+        onImproved: ((Location) -> Unit)? = null,
+    ): Location? {
         val providers = enabledProviders()
         if (providers.isEmpty()) return null
-        return withTimeoutOrNull(timeoutMillis) {
-            suspendCancellableCoroutine<Location?> { continuation ->
+        // Taxminiy joylashuvga ruxsat berilgan bo'lsa, aniq o'lchov umuman kelmaydi: birinchisi olinadi
+        val goodEnough = if (isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            GOOD_ACCURACY_METERS
+        } else {
+            Float.MAX_VALUE
+        }
+        var best: Location? = null
+        withTimeoutOrNull(timeoutMillis) {
+            suspendCancellableCoroutine<Unit> { continuation ->
                 val listener = object : LocationListener {
                     override fun onLocationChanged(location: Location) {
-                        manager.removeUpdates(this)
-                        if (continuation.isActive) continuation.resume(location)
+                        if (!continuation.isActive) return
+                        if (isMoreAccurate(location.accuracyOrNull(), best?.accuracyOrNull(), best != null)) {
+                            best = location
+                            onImproved?.invoke(location)
+                        }
+                        if ((location.accuracyOrNull() ?: Float.MAX_VALUE) <= goodEnough) {
+                            manager.removeUpdates(this)
+                            continuation.resume(Unit)
+                        }
                     }
 
                     // Eski Android versiyalarida bu funksiyalar majburiy
@@ -89,9 +111,27 @@ class LocationFinder(context: Context) {
                     }
                 } catch (e: Exception) {
                     manager.removeUpdates(listener)
-                    if (continuation.isActive) continuation.resume(null)
+                    if (continuation.isActive) continuation.resume(Unit)
                 }
             }
         }
+        return best
     }
+
+    private companion object {
+        const val GOOD_ACCURACY_METERS = 50f
+    }
+}
+
+private fun Location.accuracyOrNull(): Float? = if (hasAccuracy()) accuracy else null
+
+/**
+ * Yangi o'lchov avvalgi eng yaxshisidan aniqroqmi. Aniqligi noma'lum o'lchov faqat hali hech
+ * narsa bo'lmaganda olinadi. [hasBest]: avval biror o'lchov ko'rilganmi.
+ */
+internal fun isMoreAccurate(candidate: Float?, best: Float?, hasBest: Boolean): Boolean = when {
+    !hasBest -> true
+    candidate == null -> false
+    best == null -> true
+    else -> candidate < best
 }

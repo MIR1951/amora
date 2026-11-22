@@ -4,7 +4,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -75,9 +74,15 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
     private val _state = MutableStateFlow(VerifyUiState())
     val state: StateFlow<VerifyUiState> = _state.asStateFlow()
 
+    // Kod va eskirish vaqti telefonda saqlanadi (Account): mijoz Telegramga o'tgan paytda tizim
+    // ilovani yopib qo'ysa ham, qaytganda kutish shu yerdan davom etadi
     private var code: String? = null
     private var pollJob: Job? = null
     private val checkLock = Mutex()
+
+    init {
+        resume()
+    }
 
     fun start(name: String?) {
         val step = _state.value.step
@@ -95,22 +100,49 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
                         pendingOpen = true,
                     )
                 }
-                poll(started.expiresIn)
+                poll(started.expiresAt)
             } catch (e: ApiException) {
                 _state.update { it.copy(step = VerifyStep.Idle, error = e.message) }
             }
         }
     }
 
-    private fun poll(expiresInSeconds: Int) {
+    /**
+     * Ekran ochildi yoki ilova ekranga qaytdi. Kutilayotgan kod bo'lsa, darhol tekshiriladi;
+     * ilova yopilib qayta ochilgan bo'lsa, saqlangan kod bilan kutish davom ettiriladi.
+     */
+    fun resume() {
+        when (_state.value.step) {
+            VerifyStep.Waiting -> checkNow()
+            VerifyStep.Idle -> {
+                val pending = container.account.pendingVerification() ?: return
+                code = pending.code
+                _state.update {
+                    it.copy(
+                        step = VerifyStep.Waiting,
+                        appUrl = pending.appUrl.takeIf { url -> url.isNotEmpty() },
+                        botUrl = pending.botUrl.takeIf { url -> url.isNotEmpty() },
+                        error = null,
+                        pendingOpen = false,
+                    )
+                }
+                poll(pending.expiresAt)
+                checkNow()
+            }
+            else -> Unit
+        }
+    }
+
+    /** [expiresAt]: kod eskiradigan vaqt (telefon soati bo'yicha). */
+    private fun poll(expiresAt: Long) {
         pollJob?.cancel()
-        val deadline = SystemClock.elapsedRealtime() + expiresInSeconds * 1000L
         pollJob = viewModelScope.launch {
-            while (isActive && SystemClock.elapsedRealtime() < deadline) {
+            while (isActive && System.currentTimeMillis() < expiresAt) {
                 delay(POLL_MS)
                 if (checkOnce()) return@launch
             }
             if (_state.value.step == VerifyStep.Waiting) {
+                container.account.cancelVerification()
                 _state.update {
                     it.copy(step = VerifyStep.Idle, error = "Vaqt tugadi. Qaytadan urinib ko'ring")
                 }
@@ -129,9 +161,15 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
                     true
                 }
                 VerificationResult.Pending -> false
+                // Boshqa joyda bekor qilingan (masalan ikkinchi profil ekranida)
+                VerificationResult.Cancelled -> {
+                    _state.update { it.copy(step = VerifyStep.Idle, pendingOpen = false) }
+                    true
+                }
             }
         } catch (e: ApiException) {
-            if (e.isNetwork) return false // internet qaytgach yana so'raladi
+            // Internet qaytgach yoki server tuzalgach yana so'raladi
+            if (e.isNetwork || e.status >= 500) return false
             _state.update { it.copy(step = VerifyStep.Idle, error = e.message) }
             true
         }
@@ -156,6 +194,7 @@ class PhoneVerificationViewModel(private val container: AppContainer) : ViewMode
     fun cancel() {
         pollJob?.cancel()
         code = null
+        container.account.cancelVerification()
         _state.update { it.copy(step = VerifyStep.Idle, pendingOpen = false) }
     }
 
@@ -232,7 +271,7 @@ fun PhoneVerificationSection(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) vm.checkNow()
+            if (event == Lifecycle.Event.ON_RESUME) vm.resume()
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }

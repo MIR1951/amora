@@ -180,7 +180,8 @@ val ColorScheme.isDark: Boolean
 
 /** Ikkinchi darajali yozuvlar: belgilar ostidagi izoh, sana, maydon nomi. */
 val ColorScheme.hint: Color
-    get() = if (isDark) Color(0xFF8A8178) else Color(0xFF9C938A)
+    // Och fonda (krem va oq) kontrast 4.5:1 dan past bo'lmasligi kerak: kichik yozuvlar ham o'qiladi
+    get() = if (isDark) Color(0xFF8A8178) else Color(0xFF746C64)
 
 /** "Ko'mir" bloklar foni: banner, savat paneli, buyurtma holati. Ustidagi yozuv har doim oq. */
 val ColorScheme.ink: Color

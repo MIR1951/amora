@@ -50,6 +50,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -194,6 +196,15 @@ fun MenuScreen(
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val glass = rememberGlassState()
 
+    val snackbar = remember { SnackbarHostState() }
+    val message by vm.message.collectAsStateWithLifecycle()
+    LaunchedEffect(message) {
+        message?.let {
+            snackbar.showSnackbar(it)
+            vm.clearMessage()
+        }
+    }
+
     // Ekran ko'rinib turganda menyu yangilanadi va faol buyurtmalar tekshirib turiladi
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
@@ -238,6 +249,7 @@ fun MenuScreen(
                 onOpenProfile = onOpenProfile,
             )
         },
+        snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             // Savat bo'sh bo'lsa ham shu joy tizim tugmalari balandligini egallab turadi
             Box(modifier = Modifier.navigationBarsPadding()) {

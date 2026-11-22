@@ -112,6 +112,7 @@ fun CartScreen(
 
     val snackbar = remember { SnackbarHostState() }
     var confirming by rememberSaveable { mutableStateOf(false) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
 
     val createdOrderId = state.createdOrderId
     LaunchedEffect(createdOrderId) {
@@ -167,7 +168,8 @@ fun CartScreen(
                 onBack = onBack,
                 actions = {
                     if (active) {
-                        TextButton(onClick = { container.cart.clear() }) {
+                        // Buyurtma yuborilayotgan paytda savatni tozalab bo'lmaydi
+                        TextButton(onClick = { confirmClear = true }, enabled = !state.submitting) {
                             Text(
                                 text = "Tozalash",
                                 style = MaterialTheme.typography.labelLarge,
@@ -425,6 +427,20 @@ fun CartScreen(
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        ConfirmDialog(
+            title = "Savatni tozalaysizmi?",
+            text = "Savatdagi hamma taom, izoh va promokod o'chiriladi.",
+            confirmLabel = "Tozalash",
+            dismissLabel = "Yo'q, qolsin",
+            onConfirm = {
+                confirmClear = false
+                container.cart.clear()
+            },
+            onDismiss = { confirmClear = false },
+        )
     }
 
     if (confirming && quote != null) {

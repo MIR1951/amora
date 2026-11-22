@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.location.Location
+import android.net.Uri
 import android.provider.Settings
+import android.view.MotionEvent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -74,6 +76,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -101,6 +104,7 @@ import uz.amora.app.ui.components.IconTile
 import uz.amora.app.ui.components.RoundButton
 import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
+import uz.amora.app.ui.components.findActivity
 import uz.amora.app.ui.components.glassSource
 import uz.amora.app.ui.components.rememberGlassState
 import uz.amora.app.ui.theme.amber
@@ -151,8 +155,14 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         if (cafeLatitude != null && cafeLongitude != null) GeoPoint(cafeLatitude, cafeLongitude) else null
     }
 
+    // Xarita ko'rsatib turgan joy va yaqinlik (kenglik, uzunlik, zoom): ekran aylantirilganda
+    // xarita boshlang'ich joyga qaytib ketmaydi
+    var camera by rememberSaveable { mutableStateOf<DoubleArray?>(null) }
+    val restoredCamera = remember { camera }
+
     val startPoint = remember {
         when {
+            restoredCamera != null -> GeoPoint(restoredCamera[0], restoredCamera[1])
             saved != null -> GeoPoint(saved.latitude, saved.longitude)
             cafePoint != null -> GeoPoint(cafePoint.latitude, cafePoint.longitude)
             else -> GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE)
@@ -163,6 +173,7 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
             context = context,
             start = startPoint,
             zoom = when {
+                restoredCamera != null -> restoredCamera[2]
                 saved != null -> STREET_ZOOM
                 cafePoint != null -> CITY_ZOOM
                 else -> COUNTRY_ZOOM
@@ -195,6 +206,11 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
     var locating by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var locationOff by remember { mutableStateOf(false) }
+    // Joylashuvga ruxsat butunlay rad etilgan: tizim oynasi endi chiqmaydi, faqat ilova sozlamalaridan yoqiladi
+    var permissionBlocked by remember { mutableStateOf(false) }
+    // Mijoz xaritaga necha marta qo'l tekkizgani: joylashuv aniqlanayotgan paytda o'zi sura
+    // boshlasa, kechikib kelgan natija xaritani uning tanlagan joyidan olib ketmaydi
+    val mapTouches = remember { intArrayOf(0) }
 
     // Pastki panel balandligi ma'lum bo'lgach (yoki o'zgarsa), belgi joyi qayta hisoblanadi.
     // Tanlangan nuqta o'zgarmaydi: xarita shunga mos suriladi.
@@ -223,12 +239,14 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         val listener = object : MapListener {
             override fun onScroll(event: ScrollEvent?): Boolean {
                 center = pinPoint()
+                camera = doubleArrayOf(center.latitude, center.longitude, mapView.zoomLevelDouble)
                 moving = true
                 return false
             }
 
             override fun onZoom(event: ZoomEvent?): Boolean {
                 center = pinPoint()
+                camera = doubleArrayOf(center.latitude, center.longitude, mapView.zoomLevelDouble)
                 moving = true
                 // Xarita yetarlicha yaqinlashtirilgach, shu haqdagi ogohlantirish o'chadi
                 if (notice == ZOOM_NOTICE && mapView.zoomLevelDouble >= MIN_CONFIRM_ZOOM) notice = null
@@ -236,7 +254,15 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
             }
         }
         mapView.addMapListener(listener)
-        onDispose { mapView.removeMapListener(listener) }
+        // Faqat sanaydi (false qaytaradi): xaritani surish va kattalashtirish avvalgidek ishlaydi
+        mapView.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) mapTouches[0]++
+            false
+        }
+        onDispose {
+            mapView.removeMapListener(listener)
+            mapView.setOnTouchListener(null)
+        }
     }
 
     // Xarita to'xtagach belgi joyiga qo'nadi
@@ -275,6 +301,11 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
                         locationOff = false
                         notice = null
                     }
+                    // Ilova sozlamalaridan ruxsat berib qaytilgan bo'lsa ham
+                    if (permissionBlocked && finder.hasPermission()) {
+                        permissionBlocked = false
+                        notice = null
+                    }
                 }
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 else -> Unit
@@ -287,30 +318,36 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
-    val showLocation: (Location) -> Unit = { location ->
+    // `move`: xarita ham o'sha joyga suriladi; aks holda faqat "men shu yerdaman" nuqtasi qo'yiladi
+    val showLocation: (Location, Boolean) -> Unit = { location, move ->
         val point = GeoPoint(location.latitude, location.longitude)
         myLocationMarker.position = point
         if (!mapView.overlays.contains(myLocationMarker)) mapView.overlays.add(myLocationMarker)
-        mapView.controller.animateTo(point, STREET_ZOOM, 700L)
+        if (move) mapView.controller.animateTo(point, STREET_ZOOM, 700L)
         mapView.invalidate()
     }
 
     val locate: () -> Unit = {
         if (!finder.isEnabled()) {
             locationOff = true
+            permissionBlocked = false
             notice = "Telefonda joylashuv (GPS) o'chirilgan. Uni yoqing yoki manzilni xaritadan qo'lda tanlang."
         } else if (!locating) {
             locationOff = false
+            permissionBlocked = false
             notice = null
             locating = true
+            // Shu paytdan keyin mijoz xaritaga tegsa, natija uni surmaydi
+            val touchesAtStart = mapTouches[0]
             scope.launch {
                 try {
                     val lastKnown = finder.lastKnown()
-                    if (lastKnown != null) showLocation(lastKnown)
-                    val current = finder.current()
-                    if (current != null) {
-                        showLocation(current)
-                    } else if (lastKnown == null) {
+                    if (lastKnown != null) showLocation(lastKnown, mapTouches[0] == touchesAtStart)
+                    // Aniqroq o'lchov kelgan sari xarita ham aniqroq joyga suriladi
+                    val current = finder.current { better ->
+                        showLocation(better, mapTouches[0] == touchesAtStart)
+                    }
+                    if (current == null && lastKnown == null) {
                         notice = "Joylashuvni aniqlab bo'lmadi. Manzilni xaritadan qo'lda tanlang."
                     }
                 } finally {
@@ -326,7 +363,18 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         if (result.values.any { it }) {
             locate()
         } else {
-            notice = "Joylashuvga ruxsat berilmadi. Manzilni xaritadan qo'lda tanlang."
+            // Rad etilgandan keyin tizim "nega kerakligini tushuntir" demasa, oyna endi umuman
+            // chiqmaydi: ruxsatni faqat ilova sozlamalaridan yoqish mumkin
+            val activity = context.findActivity()
+            permissionBlocked = activity != null && result.keys.none {
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, it)
+            }
+            locationOff = false
+            notice = if (permissionBlocked) {
+                "Joylashuvga ruxsat berilmagan. Uni ilova sozlamalaridan yoqing yoki manzilni xaritadan qo'lda tanlang."
+            } else {
+                "Joylashuvga ruxsat berilmadi. Manzilni xaritadan qo'lda tanlang."
+            }
         }
     }
 
@@ -343,14 +391,20 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
         }
     }
 
-    // Manzil birinchi marta tanlanayotgan bo'lsa, xaritani darhol mijoz turgan joyga olib boramiz
+    // Manzil birinchi marta tanlanayotgan bo'lsa, xaritani darhol mijoz turgan joyga olib boramiz.
+    // Faqat bir marta: ekran aylantirilganda ruxsat oynasi qayta chiqmaydi va xarita qayta surilmaydi
+    var autoLocated by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (saved == null) onMyLocation()
+        if (saved == null && !autoLocated) {
+            autoLocated = true
+            onMyLocation()
+        }
     }
 
     val confirm: () -> Unit = {
         if (mapView.zoomLevelDouble < MIN_CONFIRM_ZOOM) {
             locationOff = false
+            permissionBlocked = false
             notice = ZOOM_NOTICE
         } else {
             val point = pinPoint()
@@ -417,8 +471,15 @@ fun AddressScreen(container: AppContainer, onBack: () -> Unit) {
             MapHint(
                 glass = glass,
                 warning = warning,
-                actionLabel = if (!outOfZone && locationOff) "Joylashuv sozlamalarini ochish" else null,
-                onAction = { openLocationSettings(context) },
+                actionLabel = when {
+                    outOfZone -> null
+                    locationOff -> "Joylashuv sozlamalarini ochish"
+                    permissionBlocked -> "Ilova sozlamalarini ochish"
+                    else -> null
+                },
+                onAction = {
+                    if (locationOff) openLocationSettings(context) else openAppSettings(context)
+                },
                 modifier = Modifier.weight(1f, fill = false),
             )
         }
@@ -716,6 +777,18 @@ private fun createMyLocationMarker(context: Context, mapView: MapView): Marker {
     marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
     marker.setOnMarkerClickListener { _, _ -> true }
     return marker
+}
+
+/** Telefon sozlamalaridagi shu ilova sahifasi: ruxsatlar o'sha yerdan yoqiladi. */
+private fun openAppSettings(context: Context) {
+    try {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", context.packageName, null)),
+        )
+    } catch (e: Exception) {
+        // Bunday sahifasi yo'q telefon: hech narsa ochilmaydi
+    }
 }
 
 private fun openLocationSettings(context: Context) {

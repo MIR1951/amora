@@ -57,11 +57,13 @@ import uz.amora.app.R
 import uz.amora.app.data.Profile
 import uz.amora.app.ui.components.BigButton
 import uz.amora.app.ui.components.BottomDock
+import uz.amora.app.ui.components.ConfirmDialog
 import uz.amora.app.ui.components.GlassTopBar
 import uz.amora.app.ui.components.LinkRow
 import uz.amora.app.ui.components.RowDivider
 import uz.amora.app.ui.components.SectionCard
 import uz.amora.app.ui.components.SectionLabel
+import uz.amora.app.ui.components.SoftButton
 import uz.amora.app.ui.components.fieldBorder
 import uz.amora.app.ui.components.fieldColors
 import uz.amora.app.ui.components.glassSource
@@ -111,14 +113,55 @@ fun ProfileScreen(
     // Ism faqat tasdiqlangan hisobda alohida saqlanadi; yangi mijozning ismi tasdiqlash bilan ketadi
     val canSaveName = verified && cleanName.isNotEmpty() && cleanName != profile?.name
 
+    var saving by remember { mutableStateOf(false) }
     val save: () -> Unit = {
-        if (canSaveName) {
-            container.account.saveName(cleanName)
+        if (canSaveName && !saving) {
             focusManager.clearFocus()
-            if (quickEdit) {
-                onBack()
-            } else {
-                scope.launch { snackbar.showSnackbar("Saqlandi") }
+            saving = true
+            scope.launch {
+                // Server qabul qilgandan keyingina "Saqlandi" deyiladi; xato bo'lsa, sababi ko'rsatiladi
+                val error = try {
+                    container.account.saveName(cleanName)
+                } finally {
+                    saving = false
+                }
+                when {
+                    error != null -> snackbar.showSnackbar(error)
+                    quickEdit -> onBack()
+                    else -> snackbar.showSnackbar("Saqlandi")
+                }
+            }
+        }
+    }
+
+    // Hisobdan chiqish va hisobni o'chirish: ikkalasi ham tasdiq so'raydi
+    var confirmLogout by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var accountBusy by remember { mutableStateOf(false) }
+    val logout: () -> Unit = {
+        if (!accountBusy) {
+            accountBusy = true
+            scope.launch {
+                try {
+                    container.logout()
+                } finally {
+                    accountBusy = false
+                }
+                snackbar.showSnackbar("Hisobdan chiqdingiz")
+            }
+        }
+    }
+    val deleteAccount: () -> Unit = {
+        if (!accountBusy) {
+            accountBusy = true
+            scope.launch {
+                val error = try {
+                    container.deleteAccount()
+                } finally {
+                    accountBusy = false
+                }
+                // Xato matni serverdan keladi (masalan tugallanmagan buyurtma bor): o'zicha ko'rsatiladi
+                snackbar.showSnackbar(error ?: "Hisobingiz o'chirildi")
             }
         }
     }
@@ -149,7 +192,7 @@ fun ProfileScreen(
         bottomBar = {
             if (quickEdit && verified) {
                 BottomDock(glass = glass) {
-                    BigButton(text = "Saqlash", onClick = save, enabled = canSaveName)
+                    BigButton(text = "Saqlash", onClick = save, enabled = canSaveName, loading = saving)
                 }
             }
         },
@@ -209,7 +252,7 @@ fun ProfileScreen(
             if (!quickEdit) {
                 // Tugma faqat biror narsa o'zgarganda chiqadi: o'zgarish bo'lmasa saqlaydigan narsa yo'q
                 AnimatedVisibility(visible = canSaveName) {
-                    BigButton(text = "Saqlash", onClick = save)
+                    BigButton(text = "Saqlash", onClick = save, loading = saving)
                 }
 
                 SectionLabel("Yetkazish va aloqa")
@@ -250,6 +293,23 @@ fun ProfileScreen(
                     )
                 }
 
+                // Faqat hisobga kirilgan bo'lsa ko'rinadi
+                if (verified) {
+                    SectionLabel("Hisob")
+                    SoftButton(
+                        text = "Chiqish",
+                        onClick = { confirmLogout = true },
+                        enabled = !accountBusy,
+                    )
+                    SoftButton(
+                        text = "Hisobni o'chirish",
+                        onClick = { confirmDelete = true },
+                        icon = R.drawable.ic_close,
+                        enabled = !accountBusy,
+                        danger = true,
+                    )
+                }
+
                 Text(
                     text = "Amora · ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodySmall,
@@ -261,6 +321,34 @@ fun ProfileScreen(
                 )
             }
         }
+    }
+    if (confirmLogout) {
+        ConfirmDialog(
+            title = "Hisobdan chiqasizmi?",
+            text = "Buyurtma berish uchun raqamingizni Telegram orqali qayta tasdiqlashingiz kerak bo'ladi.",
+            confirmLabel = "Chiqish",
+            dismissLabel = "Bekor qilish",
+            onConfirm = {
+                confirmLogout = false
+                logout()
+            },
+            onDismiss = { confirmLogout = false },
+        )
+    }
+
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Hisobni o'chirasizmi?",
+            text = "Ismingiz va manzillaringiz o'chiriladi, buyurtmalar tarixi hisobingizda boshqa " +
+                "ko'rinmaydi. Buni ortga qaytarib bo'lmaydi.",
+            confirmLabel = "O'chirish",
+            dismissLabel = "Bekor qilish",
+            onConfirm = {
+                confirmDelete = false
+                deleteAccount()
+            },
+            onDismiss = { confirmDelete = false },
+        )
     }
 }
 

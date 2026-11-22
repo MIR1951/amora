@@ -2,14 +2,21 @@ package uz.amora.app.data
 
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 
 /**
  * Serverdan kelgan xato. `message` o'zbekcha va mijozga to'g'ridan-to'g'ri ko'rsatiladi,
@@ -23,6 +30,7 @@ class ApiException(
 ) : Exception(message) {
     val isNetwork: Boolean get() = code == CODE_NETWORK
     val isUnauthorized: Boolean get() = status == 401
+    val isNotFound: Boolean get() = status == 404
 
     companion object {
         const val CODE_NETWORK = "network"
@@ -30,10 +38,17 @@ class ApiException(
     }
 }
 
-/** Amora serveri bilan aloqa. Barcha manzillar `/api/v1` ostida. */
+/**
+ * Amora serveri bilan aloqa. Barcha manzillar `/api/v1` ostida.
+ *
+ * `onUnauthorized`: server so'rov bilan yuborilgan kirish kalitini tanimadi (401). Qaysi so'rov
+ * bo'lishidan qat'i nazar shu bitta joydan xabar beriladi; yuborilgan kalit ham beriladi, chunki
+ * javob kelguncha telefonda yangi kalit saqlangan bo'lishi mumkin.
+ */
 class ApiClient(
     baseUrl: String,
     private val tokenProvider: () -> String?,
+    private val onUnauthorized: (tokenUsed: String) -> Unit = {},
 ) {
     private val apiUrl = baseUrl.trimEnd('/') + "/api/v1"
 
@@ -83,6 +98,16 @@ class ApiClient(
         auth = true,
     )
 
+    /** Hisobdan chiqish: server shu telefonning kirish kalitini bekor qiladi. */
+    suspend fun logout() {
+        request("POST", "/auth/logout", body = "", auth = true)
+    }
+
+    /** Hisobni o'chirish. Tugallanmagan buyurtma bo'lsa, server 409 (`has_active_orders`) qaytaradi. */
+    suspend fun deleteAccount() {
+        request("DELETE", "/me", auth = true)
+    }
+
     suspend fun updatePushToken(token: String): Customer = call(
         "PATCH",
         "/me",
@@ -112,13 +137,18 @@ class ApiClient(
         auth = true,
     )
 
-    suspend fun createOrder(order: OrderIn): Order = call(
-        "POST",
-        "/orders",
-        Order.serializer(),
-        body = json.encodeToString(OrderIn.serializer(), order),
-        auth = true,
-    )
+    // Bu so'rov ekran yopilganda ham bekor qilinmaydi: buyurtma serverga yetib borgan bo'lsa,
+    // javobi ham albatta o'qilishi kerak (aks holda mijoz uni ikkinchi marta yuboradi)
+    suspend fun createOrder(order: OrderIn): Order = withContext(NonCancellable) {
+        call(
+            "POST",
+            "/orders",
+            Order.serializer(),
+            body = json.encodeToString(OrderIn.serializer(), order),
+            auth = true,
+            cancellable = false,
+        )
+    }
 
     suspend fun orders(limit: Int = 20, offset: Int = 0): OrderList = call(
         "GET",
@@ -140,46 +170,79 @@ class ApiClient(
         serializer: DeserializationStrategy<T>,
         body: String? = null,
         auth: Boolean = false,
-    ): T = withContext(Dispatchers.IO) {
-        val builder = Request.Builder()
-            .url(apiUrl + path)
-            .header("Accept", "application/json")
-        if (auth) {
-            val token = tokenProvider()
-            if (!token.isNullOrEmpty()) builder.header("Authorization", "Bearer $token")
-        }
-        if (method == "GET") {
-            builder.get()
-        } else {
-            builder.method(method, (body ?: "").toRequestBody(JSON_MEDIA_TYPE))
-        }
-
-        val (status, text) = try {
-            http.newCall(builder.build()).execute().use { response ->
-                Pair(response.code, response.body?.string() ?: "")
-            }
-        } catch (e: IOException) {
-            throw ApiException(
-                0,
-                ApiException.CODE_NETWORK,
-                "Internet bilan aloqa yo'q. Tarmoqni tekshirib, qayta urinib ko'ring",
-            )
-        }
-
-        if (status in 200..299) {
+        cancellable: Boolean = true,
+    ): T {
+        val text = request(method, path, body, auth, cancellable)
+        // Katta javobni (menyu) o'qish asosiy oqimni band qilmasin
+        return withContext(Dispatchers.Default) {
             try {
                 json.decodeFromString(serializer, text)
             } catch (e: IllegalArgumentException) {
                 throw ApiException(
-                    status,
+                    200,
                     ApiException.CODE_BAD_RESPONSE,
                     "Serverdan tushunarsiz javob keldi. Birozdan keyin qayta urinib ko'ring",
                 )
             }
-        } else {
-            throw parseError(status, text)
         }
     }
+
+    /** So'rovni yuboradi va muvaffaqiyatli javob matnini qaytaradi. Xato bo'lsa [ApiException]. */
+    private suspend fun request(
+        method: String,
+        path: String,
+        body: String? = null,
+        auth: Boolean = false,
+        cancellable: Boolean = true,
+    ): String {
+        val builder = Request.Builder()
+            .url(apiUrl + path)
+            .header("Accept", "application/json")
+        val token = if (auth) tokenProvider()?.takeIf { it.isNotEmpty() } else null
+        if (token != null) builder.header("Authorization", "Bearer $token")
+        when {
+            method == "GET" -> builder.get()
+            method == "DELETE" && body == null -> builder.delete()
+            else -> builder.method(method, (body ?: "").toRequestBody(JSON_MEDIA_TYPE))
+        }
+
+        val (status, text) = execute(http.newCall(builder.build()), cancellable)
+        if (status in 200..299) return text
+        if (status == 401 && token != null) onUnauthorized(token)
+        throw parseError(status, text)
+    }
+
+    /**
+     * Javobni kutadi. So'rovni kutayotgan ish bekor qilinsa (ekran yopildi), tarmoq so'rovi ham
+     * to'xtatiladi; `cancellable = false` bo'lsa, so'rov oxirigacha boradi.
+     */
+    private suspend fun execute(call: Call, cancellable: Boolean): Pair<Int, String> =
+        suspendCancellableCoroutine { continuation ->
+            if (cancellable) continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(
+                object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(networkError())
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val result = try {
+                            response.use { Pair(it.code, it.body?.string() ?: "") }
+                        } catch (e: IOException) {
+                            if (continuation.isActive) continuation.resumeWithException(networkError())
+                            return
+                        }
+                        if (continuation.isActive) continuation.resume(result)
+                    }
+                },
+            )
+        }
+
+    private fun networkError() = ApiException(
+        0,
+        ApiException.CODE_NETWORK,
+        "Internet bilan aloqa yo'q. Tarmoqni tekshirib, qayta urinib ko'ring",
+    )
 
     private fun parseError(status: Int, text: String): ApiException {
         val info = try {

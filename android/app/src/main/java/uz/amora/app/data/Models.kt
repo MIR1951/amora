@@ -204,6 +204,8 @@ data class Order(
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
     val history: List<StatusEvent> = emptyList(),
+    // Buyurtmani yuborgan ilova bergan kalit (server qaytarsa): javobi yo'qolgan buyurtma shu orqali topiladi
+    @SerialName("client_order_id") val clientOrderId: String? = null,
 )
 
 @Serializable
