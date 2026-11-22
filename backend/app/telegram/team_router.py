@@ -88,7 +88,7 @@ async def cb_team_invite(
     await show(
         callback,
         texts.invite_text(link, target, INVITE_HOURS),
-        kb.back_keyboard(AdminCb(action="team"), "⬅️ Xodimlar"),
+        kb.invite_keyboard(link, texts.invite_share_text(target)),
     )
 
 
@@ -173,6 +173,14 @@ async def accept_invite(
             await message.answer(
                 "Bu taklif havolasi eskirgan yoki allaqachon ishlatilgan. "
                 "Admindan yangi havola so'rang."
+            )
+            return
+        if user.id == invite.created_by:
+            # Havolani yaratgan odam uni tekshirib bosib ko'rsa, havola yonib ketmasin
+            await session.commit()
+            await message.answer(
+                "Bu havolani o'zingiz yaratgansiz. Uni yangi odamga yuboring: "
+                "u bosgandagina ishlaydi."
             )
             return
         if current == OWNER:

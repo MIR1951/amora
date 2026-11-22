@@ -388,12 +388,21 @@ def team_text(owner_ids: list[int], members: list[Staff]) -> str:
 
 def invite_text(link: str, role: str, hours: int) -> str:
     who = "admin" if role == "admin" else "xodim"
+    # Havola aniq <a> teg bilan beriladi: iOS Telegram oddiy matndagi havolani
+    # har doim ham bosiladigan qilmaydi. Nusxa olish uchun pastda tugma bor.
     return (
         f"🔗 <b>Yangi {who} uchun taklif havolasi</b>\n\n"
-        f"{escape(link)}\n\n"
-        f"Havolani faqat o'sha odamga yuboring. U havolani bosib, botda <b>Start</b> ni "
-        f"bossa, {who} bo'lib qo'shiladi. Havola {hours} soat amal qiladi va faqat bir marta ishlaydi."
+        f'<a href="{escape(link)}">{escape(link)}</a>\n\n'
+        f"Pastdagi <b>📤 Havolani yuborish</b> tugmasini bosib, havolani faqat o'sha odamga "
+        f"yuboring. U havolani bosib, botda <b>Start</b> ni bossa, {who} bo'lib qo'shiladi. "
+        f"Havola {hours} soat amal qiladi va faqat bir marta ishlaydi. "
+        f"Havolani o'zingiz bossangiz, u ishlatilmaydi."
     )
+
+
+def invite_share_text(role: str) -> str:
+    who = "admin" if role == "admin" else "xodim"
+    return f"Amora botiga {who} bo'lib qo'shilish uchun havolani bosing va Start ni bosing."
 
 
 # ---------- Aksiyalar ----------

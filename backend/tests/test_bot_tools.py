@@ -1,5 +1,6 @@
 """Botning boshqaruv vositalari: hisobot, kechikish eslatmasi, mijoz kartasi, adminlar va xodimlar."""
 
+import re
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -357,7 +358,11 @@ async def invite(driver, role_label: str) -> str:
     await driver.press(role_label)
     screen = driver.screen
     assert "https://t.me/amora_test_bot?start=inv_" in screen
-    return screen.split("start=", 1)[1].split()[0]
+    return invite_payload(screen)
+
+
+def invite_payload(screen: str) -> str:
+    return re.search(r"start=(inv_[\w-]+)", screen).group(1)
 
 
 async def start_as(driver, user_id: int, args: str = "") -> None:
@@ -395,6 +400,35 @@ async def test_expired_invite_does_not_work(driver, seed, session_factory):
         await session.commit()
     await start_as(driver, NEW_PERSON, payload)
     assert "eskirgan" in driver.screen
+
+
+async def test_invite_link_is_tappable_and_shareable(driver, seed):
+    from urllib.parse import parse_qs, urlsplit
+
+    payload = await invite(driver, "Admin qo'shish")
+    link = f"https://t.me/amora_test_bot?start={payload}"
+    # iOS Telegram oddiy matnni har doim ham havolaga aylantirmaydi, shuning uchun aniq <a> teg
+    assert f'<a href="{link}">{link}</a>' in driver.screen
+    assert driver.buttons == ["📤 Havolani yuborish", "📋 Nusxa olish", "⬅️ Xodimlar"]
+
+    rows = driver.session.last_markup.inline_keyboard
+    share = urlsplit(rows[0][0].url)
+    assert (share.netloc, share.path) == ("t.me", "/share/url")
+    query = parse_qs(share.query)
+    assert query["url"] == [link]
+    assert "admin" in query["text"][0]
+    assert rows[1][0].copy_text.text == link
+
+
+async def test_inviter_tapping_own_link_does_not_use_it(driver, seed, tg):
+    payload = await invite(driver, "Xodim qo'shish")
+    await start_as(driver, ADMIN_ID, payload)
+    assert "o'zingiz yaratgansiz" in driver.screen
+
+    # Havola yonib ketmagan: yangi odam hali ham qo'shila oladi
+    tg.clear()
+    await start_as(driver, NEW_PERSON, payload)
+    assert "xodim</b> bo'lib qo'shildingiz" in tg.of_type(SendMessage)[0].text
 
 
 async def test_staff_can_do_daily_work_only(api, driver, seed, tg, session_factory, bot_cfg):
@@ -500,7 +534,7 @@ async def test_removed_admins_invites_stop_working(driver, seed, session_factory
     await start_as(driver, NEW_PERSON)
     await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
-    payload = driver.screen.split("start=", 1)[1].split()[0]
+    payload = invite_payload(driver.screen)
 
     # Egasi adminni olib tashlaydi: u yaratgan havola ham ishlamay qoladi
     await driver.say("/start")
@@ -522,7 +556,7 @@ async def test_invite_from_demoted_inviter_is_refused(driver, seed, session_fact
     await start_as(driver, NEW_PERSON)
     await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
-    payload = driver.screen.split("start=", 1)[1].split()[0]
+    payload = invite_payload(driver.screen)
     async with session_factory() as session:
         await session.execute(update(Staff).values(role="staff"))
         await session.commit()

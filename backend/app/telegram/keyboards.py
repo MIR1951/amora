@@ -1,5 +1,8 @@
 from aiogram.filters.callback_data import CallbackData
+from urllib.parse import urlencode
+
 from aiogram.types import (
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -266,6 +269,21 @@ def customer_keyboard(phone: str, blocked: bool, can_block: bool) -> InlineKeybo
 
 
 # ---------- Xodimlar ----------
+
+
+def invite_keyboard(link: str, share_text: str) -> InlineKeyboardMarkup:
+    """Taklif havolasini yuborish va nusxa olish tugmalari.
+
+    Havolani ochadigan tugma ataylab yo'q: egasi uni o'zi bosib yubormasin.
+    """
+    share_url = "https://t.me/share/url?" + urlencode({"url": link, "text": share_text})
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📤 Havolani yuborish", url=share_url)],
+            [InlineKeyboardButton(text="📋 Nusxa olish", copy_text=CopyTextButton(text=link))],
+            [_btn("⬅️ Xodimlar", AdminCb(action="team"))],
+        ]
+    )
 
 
 def team_keyboard(members: list[Staff], can_manage_admins: bool) -> InlineKeyboardMarkup:
