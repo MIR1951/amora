@@ -68,13 +68,13 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/amora-${{ github.run_number }}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/amora-sinov-${{ github.run_number }}.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: amora-apk
           path: ${{ runner.temp }}/amora-${{ github.run_number }}.apk
           if-no-files-found: error
           retention-days: 30
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: amora-e2e-apk
           path: ${{ runner.temp }}/amora-sinov-${{ github.run_number }}.apk
@@ -159,7 +159,7 @@ jobs:
       - name: Sinov serveri jurnali
         if: always()
         run: tail -n 200 "$RUNNER_TEMP/backend.log" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-screenshots
