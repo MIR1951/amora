@@ -24,8 +24,10 @@ from aiogram.types import (
     Location,
     Message,
     PhotoSize,
+    SharedUser,
     Update,
     User,
+    UsersShared,
 )
 
 ADMIN_ID = 111
@@ -171,6 +173,17 @@ class Driver:
             user_id=user_id if contact_user_id is None else contact_user_id,
         )
         await self._feed(message=self._message(self._user(user_id), chat, contact=contact))
+
+    async def share_user(
+        self, request_id: int, picked_id: int, first_name: str = "Vali", user_id: int = ADMIN_ID
+    ) -> None:
+        """Admin "👤 Odamni tanlash" tugmasini bosib, ro'yxatdan odamni tanladi."""
+        chat = Chat(id=user_id, type="private")
+        shared = UsersShared(
+            request_id=request_id,
+            users=[SharedUser(user_id=picked_id, first_name=first_name, username="vali_k")],
+        )
+        await self._feed(message=self._message(self._user(user_id), chat, users_shared=shared))
 
     async def send_location(self, latitude: float, longitude: float, user_id: int = ADMIN_ID) -> None:
         chat = Chat(id=user_id, type="private")

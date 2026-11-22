@@ -23,7 +23,7 @@ async def cmd_start_stranger(message: Message):
     await message.answer(
         "Bu bot Amora kafe xodimlari uchun.\n\n"
         f"Sizning Telegram ID raqamingiz: <code>{message.from_user.id}</code>\n"
-        "Admin yoki xodim bo'lish uchun bot egasidan taklif havolasini so'rang."
+        "Admin yoki xodim bo'lish uchun bot egasiga ayting: u sizni botda qo'shadi."
     )
 
 

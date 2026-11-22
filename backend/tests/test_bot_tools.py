@@ -356,6 +356,7 @@ async def invite(driver, role_label: str) -> str:
     await driver.say("/start")
     await driver.press("Xodimlar")
     await driver.press(role_label)
+    await driver.press("Taklif havolasi")
     screen = driver.screen
     assert "https://t.me/amora_test_bot?start=inv_" in screen
     return invite_payload(screen)
@@ -373,7 +374,7 @@ async def test_owner_invites_admin(driver, seed, tg, session_factory):
     payload = await invite(driver, "Admin qo'shish")
 
     await start_as(driver, NEW_PERSON)
-    assert "taklif havolasini" in driver.screen  # hali begona
+    assert "bot egasiga ayting" in driver.screen  # hali begona
 
     tg.clear()
     await start_as(driver, NEW_PERSON, payload)
@@ -388,7 +389,7 @@ async def test_owner_invites_admin(driver, seed, tg, session_factory):
     await start_as(driver, STRANGER_ID, payload)
     assert "eskirgan yoki allaqachon ishlatilgan" in driver.screen
     await start_as(driver, STRANGER_ID)
-    assert "taklif havolasini" in driver.screen
+    assert "bot egasiga ayting" in driver.screen
 
 
 async def test_expired_invite_does_not_work(driver, seed, session_factory):
@@ -429,6 +430,74 @@ async def test_inviter_tapping_own_link_does_not_use_it(driver, seed, tg):
     tg.clear()
     await start_as(driver, NEW_PERSON, payload)
     assert "xodim</b> bo'lib qo'shildingiz" in tg.of_type(SendMessage)[0].text
+
+
+async def staff_role(session_factory, user_id: int) -> str | None:
+    async with session_factory() as session:
+        return await session.scalar(select(Staff.role).where(Staff.telegram_id == user_id))
+
+
+async def test_owner_adds_staff_by_picking_contact(driver, seed, tg, session_factory):
+    await driver.say("/start")
+    await driver.press("Xodimlar")
+    await driver.press("Xodim qo'shish")
+    assert driver.buttons == ["👤 Kontaktlardan tanlash", "🔗 Taklif havolasi", "⬅️ Xodimlar"]
+    assert "@amora_test_bot" in driver.screen and "/start" in driver.screen
+
+    await driver.press("Kontaktlardan tanlash")
+    keyboard = tg.of_type(SendMessage)[-1].reply_markup
+    pick = keyboard.keyboard[0][0]
+    assert pick.text == "👤 Odamni tanlash"
+    assert pick.request_users.request_id == 2 and pick.request_users.user_is_bot is False
+    assert keyboard.keyboard[1][0].text == "❌ Qo'shishni bekor qilish"
+
+    tg.clear()
+    await driver.share_user(request_id=2, picked_id=NEW_PERSON, first_name="Vali")
+    sent = tg.of_type(SendMessage)
+    assert "✅ Vali xodim qilib qo'shildi" in sent[0].text
+    assert sent[0].reply_markup.remove_keyboard is True
+    assert any(m.chat_id == NEW_PERSON and "xodim</b> bo'lib" in m.text for m in sent)
+    assert "Xodim · Vali" in driver.screen
+    assert await staff_role(session_factory, NEW_PERSON) == "staff"
+
+    # Yana tanlansa, ikkinchi marta qo'shilmaydi
+    await driver.share_user(request_id=2, picked_id=NEW_PERSON, first_name="Vali")
+    assert "allaqachon xodim" in tg.of_type(SendMessage)[-2].text
+
+    await start_as(driver, NEW_PERSON)
+    assert "boshqaruvi" in driver.screen
+
+
+async def test_pick_contact_never_demotes_or_lets_admin_make_admins(driver, seed, tg, session_factory):
+    async with session_factory() as session:
+        session.add(Staff(telegram_id=NEW_PERSON, name="Vali", role="admin"))
+        await session.commit()
+    # Egasi adminni xodim qilib tanlasa, huquqi kamaymaydi
+    await driver.share_user(request_id=2, picked_id=NEW_PERSON)
+    assert "allaqachon admin" in tg.of_type(SendMessage)[-2].text
+    assert await staff_role(session_factory, NEW_PERSON) == "admin"
+
+    # Admin boshqa odamni admin qila olmaydi, hatto tugma ma'lumoti qo'lda yasalgan bo'lsa ham
+    tg.clear()
+    await driver.share_user(request_id=1, picked_id=STAFF_PERSON, user_id=NEW_PERSON)
+    assert "faqat egasi" in tg.of_type(SendMessage)[0].text
+    assert await staff_role(session_factory, STAFF_PERSON) is None
+
+    # Admin xodim qo'sha oladi
+    await driver.share_user(request_id=2, picked_id=STAFF_PERSON, user_id=NEW_PERSON)
+    assert await staff_role(session_factory, STAFF_PERSON) == "staff"
+
+
+async def test_pick_contact_cancel(driver, seed, tg):
+    await driver.say("/start")
+    await driver.press("Xodimlar")
+    await driver.press("Xodim qo'shish")
+    await driver.press("Kontaktlardan tanlash")
+    tg.clear()
+    await driver.say("❌ Qo'shishni bekor qilish")
+    sent = tg.of_type(SendMessage)
+    assert sent[0].reply_markup.remove_keyboard is True
+    assert "Adminlar va xodimlar" in driver.screen
 
 
 async def test_staff_can_do_daily_work_only(api, driver, seed, tg, session_factory, bot_cfg):
@@ -494,7 +563,7 @@ async def test_admin_can_add_staff_but_not_admins(driver, seed, tg, session_fact
 
     # Olib tashlangan xodim endi begona
     await start_as(driver, STAFF_PERSON)
-    assert "taklif havolasini" in driver.screen
+    assert "bot egasiga ayting" in driver.screen
 
 
 async def test_owner_removes_admin(driver, seed, session_factory):
@@ -534,6 +603,7 @@ async def test_removed_admins_invites_stop_working(driver, seed, session_factory
     await start_as(driver, NEW_PERSON)
     await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
+    await driver.press("Taklif havolasi", user_id=NEW_PERSON)
     payload = invite_payload(driver.screen)
 
     # Egasi adminni olib tashlaydi: u yaratgan havola ham ishlamay qoladi
@@ -556,6 +626,7 @@ async def test_invite_from_demoted_inviter_is_refused(driver, seed, session_fact
     await start_as(driver, NEW_PERSON)
     await driver.press("Xodimlar", user_id=NEW_PERSON)
     await driver.press("Xodim qo'shish", user_id=NEW_PERSON)
+    await driver.press("Taklif havolasi", user_id=NEW_PERSON)
     payload = invite_payload(driver.screen)
     async with session_factory() as session:
         await session.execute(update(Staff).values(role="staff"))
