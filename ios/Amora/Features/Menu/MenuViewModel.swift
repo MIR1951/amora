@@ -5,7 +5,6 @@
 ///   - `init(container: AppContainer)`
 ///   - `var activeOrders: [Order]`            // container.activeOrders.orders (live)
 ///   - `private(set) var refreshing: Bool`    // pull-to-refresh running
-///   - `func refreshCatalog()`                // screen visible / back to the app (skips if one is running)
 ///   - `func retry()`                         // "Qayta urinish" after an error (shows loading)
 ///   - `func pullToRefresh() async`           // catalog + active orders
 ///   - `func refreshActiveOrders()`
@@ -18,7 +17,6 @@ import Observation
 @Observable
 final class MenuViewModel {
     private let container: AppContainer
-    @ObservationIgnored private var catalogRunning = false
 
     private(set) var refreshing = false
 
@@ -29,19 +27,6 @@ final class MenuViewModel {
     // Faol buyurtmalar butun ilova uchun bitta joyda turadi: jonli xabar kelganda ham yangilanadi
     var activeOrders: [Order] {
         container.activeOrders.orders
-    }
-
-    /// Ekran ochilganda yoki ilovaga qaytilganda menyuni yangilaydi.
-    func refreshCatalog() {
-        if catalogRunning {
-            return
-        }
-        catalogRunning = true
-        let catalog = container.catalog
-        Task { [weak self] in
-            await catalog.refresh()
-            self?.catalogRunning = false
-        }
     }
 
     /// Xatodan keyin "Qayta urinish": yuklanish belgisi ko'rsatiladi.

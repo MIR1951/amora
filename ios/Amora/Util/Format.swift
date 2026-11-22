@@ -12,6 +12,7 @@
 /// - `func formatTime(_ iso: String) -> String`                   // -> "19:03" (Asia/Tashkent)
 /// - `func formatDateTime(_ iso: String) -> String`               // -> "15-noyabr, 19:03" (Asia/Tashkent)
 /// - `func distanceKm(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double`
+/// - `func normalizeSearchText(_ text: String) -> String`         // "Qo’ziqorin " -> "qo'ziqorin"
 
 import Foundation
 
@@ -179,4 +180,21 @@ func limitText(_ text: String, _ limit: Int) -> String {
         used += size
     }
     return result
+}
+
+/// Qidiruv uchun matnni bir xil ko'rinishga keltiradi: katta-kichik harf va diakritik belgilar farqi
+/// yo'qoladi, o'zbekcha tutuq belgisining barcha ko'rinishlari (’ ‘ ʻ ʼ `) oddiy ' ga aylanadi.
+/// iPhone klaviaturasi "o’" yozadi, menyuda esa "o'" yoki "oʻ" bo'lishi mumkin.
+func normalizeSearchText(_ text: String) -> String {
+    var result = ""
+    result.reserveCapacity(text.count)
+    for char in text.trimmingCharacters(in: .whitespacesAndNewlines) {
+        switch char {
+        case "\u{2019}", "\u{2018}", "\u{02BB}", "\u{02BC}", "`", "\u{00B4}", "\u{2032}":
+            result.append("'")
+        default:
+            result.append(char)
+        }
+    }
+    return result.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
 }

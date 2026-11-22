@@ -145,13 +145,15 @@ struct MenuProductCard: View {
                     .foregroundStyle(colors.onSurface)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if quantity == 0 {
-                    AddButton(onClick: onAdd)
+                    AddButton(onClick: onAdd, name: product.name)
                 } else {
                     QuantityStepper(quantity: quantity, onMinus: onRemove, onPlus: onAdd)
                 }
             }
         }
         .frame(height: 38)
+        // Qator balandligi qat'iy: narx va "Hozircha yo'q" yozuvi undan toshib ketmasin
+        .dynamicTypeSize(...amoraControlTypeLimit)
         .contentShape(Rectangle())
     }
 }

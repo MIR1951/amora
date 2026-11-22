@@ -8,11 +8,18 @@
 /// - `TextButton(text: String, onClick: @escaping () -> Void, color: Color? = nil)`   (Material TextButton)
 /// - `RoundButton(icon: AppIcon, label: String, onClick: @escaping () -> Void, size: CGFloat = 44, cornerRadius: CGFloat? = nil, tint: Color? = nil, glass: Bool = false)`
 ///   `RoundButton(icon:label:onClick:size:cornerRadius:tint:glass:) { custom content }`  (cornerRadius nil = circle)
-/// - `AddButton(onClick: @escaping () -> Void)`
+/// - `AddButton(onClick: @escaping () -> Void, name: String? = nil)`   (`name`: the dish, for VoiceOver)
 /// - `QuantityStepper(quantity: Int, onMinus: @escaping () -> Void, onPlus: @escaping () -> Void, height: CGFloat = 38, corner: CGFloat = 13, buttonWidth: CGFloat = 28, tonal: Bool = false, label: String? = nil, expand: Bool = false)`
 /// - `TabChip(text: String, selected: Bool, onClick: @escaping () -> Void)`
+///
+/// Controls with a fixed height (BigButton, SoftButton, QuantityStepper) cap Dynamic Type at
+/// `amoraControlTypeLimit` (.xxLarge) so that their single-line text is not clipped at accessibility sizes.
 
 import SwiftUI
+
+/// Balandligi qat'iy belgilangan tugmalardagi matn shundan kattalashmaydi: undan katta o'lchamda
+/// (maxsus imkoniyatlar o'lchamlari) matn tugmaga sig'may, kesilib qolardi.
+let amoraControlTypeLimit: DynamicTypeSize = .xxLarge
 
 // MARK: - Asosiy tugma
 
@@ -93,6 +100,7 @@ struct BigButton: View {
         }
         .buttonStyle(PressScaleStyle())
         .disabled(!enabled || loading)
+        .dynamicTypeSize(...amoraControlTypeLimit)
         // Avtomatik sinov tugmani "Buyurtma berish · 45 000 so'm" ko'rinishida izlaydi
         .accessibilityLabel(trailing != nil ? "\(text) · \(trailing ?? "")" : text)
     }
@@ -160,6 +168,7 @@ struct SoftButton: View {
         }
         .buttonStyle(PressScaleStyle())
         .disabled(!enabled)
+        .dynamicTypeSize(...amoraControlTypeLimit)
         .accessibilityLabel(text)
     }
 }
@@ -310,12 +319,23 @@ struct RoundButton: View {
 }
 
 /// Taom kartochkasidagi "+" tugmasi: bosilganda taom savatga tushadi.
+/// `name`: taom nomi. Ekranni ovozda o'qiydigan yordamchi (VoiceOver) "Qo'shish: Lag'mon" deydi:
+/// ro'yxatdagi o'nlab bir xil "Qo'shish" tugmalaridan qaysi biri ekani bilinadi.
 struct AddButton: View {
     let onClick: () -> Void
+    var name: String? = nil
     @Environment(\.amoraColors) private var colors
 
-    init(onClick: @escaping () -> Void) {
+    init(onClick: @escaping () -> Void, name: String? = nil) {
         self.onClick = onClick
+        self.name = name
+    }
+
+    private var label: String {
+        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Qo'shish"
+        }
+        return "Qo'shish: \(name)"
     }
 
     var body: some View {
@@ -327,7 +347,7 @@ struct AddButton: View {
                 .contentShape(shape)
         }
         .buttonStyle(PressScaleStyle(scale: 0.88))
-        .accessibilityLabel("Qo'shish")
+        .accessibilityLabel(label)
     }
 }
 
@@ -405,6 +425,7 @@ struct QuantityStepper: View {
         }
         .frame(height: height)
         .frame(maxWidth: expand ? .infinity : nil)
+        .dynamicTypeSize(...amoraControlTypeLimit)
         .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(container))
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
     }

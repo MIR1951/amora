@@ -1,54 +1,39 @@
 /// Telegram phone verification (port of android ui/profile/PhoneVerification.kt).
 ///
 /// Surface:
-/// - `enum PhoneVerifyStep { case idle, starting, waiting, done }`           (Kotlin `VerifyStep`)
 /// - `@MainActor @Observable final class PhoneVerificationModel`             (Kotlin `PhoneVerificationViewModel`)
 /// - `struct PhoneVerificationSection: View`
 ///     `PhoneVerificationSection(profile: Profile?, name: String, toast: ToastCenter, onVerified: @escaping () -> Void)`
 ///   Needs `AppContainer` in the environment. `name`: the cleaned name the customer typed
 ///   (a new account is created with it).
+///
+/// The pending verification itself (code, expiry, result polling) lives in `Account`, not in this view:
+/// it is persisted and checked whenever the app is in the foreground, so a verification that finishes
+/// after the customer left this screen (or after the app was killed) is still picked up.
 
 import Observation
 import SwiftUI
 import UIKit
 
-/// Tasdiqlash bosqichi.
-enum PhoneVerifyStep: Equatable {
-    case idle
-    case starting
-    case waiting
-    case done
-}
-
 /// Raqamni Telegram orqali tasdiqlash: serverdan kod olinadi, bot ochiladi, mijoz u yerda
-/// "📱 Raqamni yuborish" ni bosadi. Ilova shu orada natijani bir necha soniyada bir so'rab turadi
-/// va mijoz ilovaga qaytganda darhol tekshiradi.
+/// "📱 Raqamni yuborish" ni bosadi. Natijani `Account` so'rab turadi (ilova ekranda turgan paytda va
+/// mijoz ilovaga qaytishi bilan); bu yerda faqat shu ekranning o'z holati.
 @MainActor
 @Observable
 final class PhoneVerificationModel {
-    private(set) var step: PhoneVerifyStep = .idle
-    private(set) var appUrl: String?
-    private(set) var botUrl: String?
+    // Serverdan kod so'ralmoqda
+    private(set) var starting = false
     private(set) var error: String?
     // Telegram ochilishi kerak (bir martalik hodisa: ochilgach telegramOpened() bilan o'chadi)
     private(set) var pendingOpen = false
 
-    @ObservationIgnored private var account: Account?
-    @ObservationIgnored private var code: String?
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
-    // Bir vaqtda faqat bitta tekshiruv so'rovi (Kotlin Mutex o'rnida)
-    @ObservationIgnored private var checking = false
-
-    private static let pollNanos: UInt64 = 2_000_000_000
-
     init() {}
 
     func start(name: String?, account: Account) {
-        if step == .starting || step == .waiting {
+        if starting || account.pendingVerification != nil {
             return
         }
-        self.account = account
-        step = .starting
+        starting = true
         error = nil
         let sentName: String?
         if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -58,93 +43,16 @@ final class PhoneVerificationModel {
         }
         Task { [weak self] in
             do {
-                let started = try await account.startVerification(name: sentName)
+                try await account.startVerification(name: sentName)
                 guard let self else { return }
-                self.code = started.code
-                self.appUrl = started.appUrl
-                self.botUrl = started.botUrl
-                self.step = .waiting
+                self.starting = false
                 self.pendingOpen = true
-                self.poll(expiresInSeconds: started.expiresIn)
             } catch {
                 guard let self else { return }
-                self.step = .idle
+                self.starting = false
                 if let apiError = ApiError.from(error) {
                     self.error = apiError.message
                 }
-            }
-        }
-    }
-
-    private func poll(expiresInSeconds: Int) {
-        pollTask?.cancel()
-        let deadline = Date().addingTimeInterval(TimeInterval(max(expiresInSeconds, 0)))
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled && Date() < deadline {
-                try? await Task.sleep(nanoseconds: PhoneVerificationModel.pollNanos)
-                if Task.isCancelled {
-                    return
-                }
-                guard let self else { return }
-                if await self.checkOnce() {
-                    return
-                }
-            }
-            if Task.isCancelled {
-                return
-            }
-            guard let self else { return }
-            if self.step == .waiting {
-                self.step = .idle
-                self.error = "Vaqt tugadi. Qaytadan urinib ko'ring"
-            }
-        }
-    }
-
-    /// Natijani bir marta so'raydi. Kutish tugagan bo'lsa (tasdiqlandi yoki eskirdi) true.
-    private func checkOnce() async -> Bool {
-        guard step == .waiting, let current = code, let account else {
-            return true
-        }
-        if checking {
-            // Boshqa tekshiruv hozir ketmoqda: uning natijasini kutamiz
-            return false
-        }
-        checking = true
-        defer { checking = false }
-        do {
-            let result = try await account.checkVerification(code: current)
-            switch result {
-            case .verified:
-                step = .done
-                error = nil
-                return true
-            case .pending:
-                return false
-            }
-        } catch {
-            guard let apiError = ApiError.from(error) else {
-                // So'rov bekor qilindi (mijoz "Bekor qilish"ni bosdi yoki ekran yopildi)
-                return true
-            }
-            if apiError.isNetwork {
-                return false // internet qaytgach yana so'raladi
-            }
-            step = .idle
-            self.error = apiError.message
-            return true
-        }
-    }
-
-    /// Mijoz Telegram'dan qaytdi: kutmasdan tekshiramiz.
-    func checkNow() {
-        if step != .waiting {
-            return
-        }
-        Task { [weak self] in
-            guard let self else { return }
-            if await self.checkOnce() {
-                self.pollTask?.cancel()
             }
         }
     }
@@ -157,20 +65,8 @@ final class PhoneVerificationModel {
         pendingOpen = false
     }
 
-    func cancel() {
-        pollTask?.cancel()
-        pollTask = nil
-        code = nil
-        step = .idle
-        pendingOpen = false
-    }
-
     func clearError() {
         error = nil
-    }
-
-    func consumeDone() {
-        step = .idle
     }
 }
 
@@ -184,7 +80,6 @@ struct PhoneVerificationSection: View {
 
     @Environment(AppContainer.self) private var container
     @Environment(\.amoraColors) private var colors
-    @Environment(\.scenePhase) private var scenePhase
     @State private var vm = PhoneVerificationModel()
 
     init(profile: Profile?, name: String, toast: ToastCenter, onVerified: @escaping () -> Void) {
@@ -194,13 +89,18 @@ struct PhoneVerificationSection: View {
         self.onVerified = onVerified
     }
 
+    /// Tasdiqlash boshlangan va natija kutilmoqda (ilova yopilib ochilgan bo'lsa ham).
+    private var pending: PendingVerification? {
+        container.account.pendingVerification
+    }
+
     var body: some View {
         content
-            .onChange(of: vm.pendingOpen) { _, pending in
-                if pending {
+            .onChange(of: vm.pendingOpen) { _, open in
+                if open {
                     // Avval o'chiramiz: ekran qayta chizilsa Telegram ikkinchi marta ochilmaydi
                     vm.telegramOpened()
-                    openTelegram(appUrl: vm.appUrl, botUrl: vm.botUrl)
+                    openTelegram(appUrl: pending?.appUrl, botUrl: pending?.botUrl)
                 }
             }
             .onChange(of: vm.error) { _, message in
@@ -209,26 +109,29 @@ struct PhoneVerificationSection: View {
                     vm.clearError()
                 }
             }
-            .onChange(of: vm.step) { _, step in
-                if step == .done {
-                    vm.consumeDone()
+            // Tasdiqlash tugadi (shu ekran ochiq paytda): natija bir marta ko'rsatiladi
+            .onChange(of: container.account.verificationOutcome) { _, outcome in
+                guard let outcome else { return }
+                container.account.consumeVerificationOutcome()
+                switch outcome {
+                case .verified:
                     onVerified()
-                }
-            }
-            // Telegram'dan qaytganda natija darhol tekshiriladi
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
-                    vm.checkNow()
+                case .expired:
+                    toast.show(Account.verificationExpiredMessage)
+                case .failed(let message):
+                    toast.show(message)
                 }
             }
             .onAppear {
-                vm.checkNow()
+                // Ekran yopiq paytda tugagan tasdiqlash natijasi profilning o'zida ko'rinadi:
+                // eskirgan xabar keyinroq chiqib qolmasin
+                container.account.consumeVerificationOutcome()
             }
     }
 
     @ViewBuilder
     private var content: some View {
-        if vm.step == .waiting {
+        if pending != nil {
             waitingCard
         } else if let profile, profile.verified {
             verifiedCard(profile)
@@ -256,7 +159,7 @@ struct PhoneVerificationSection: View {
                         icon: .send,
                         accent: true
                     )
-                    SoftButton(text: "Bekor qilish", onClick: { vm.cancel() })
+                    SoftButton(text: "Bekor qilish", onClick: { container.account.cancelVerification() })
                 }
             }
         }
@@ -283,7 +186,7 @@ struct PhoneVerificationSection: View {
                 SoftButton(
                     text: "Almashtirish",
                     onClick: { vm.start(name: name, account: container.account) },
-                    enabled: vm.step == .idle
+                    enabled: !vm.starting
                 )
                 .frame(width: 136)
             }
@@ -305,7 +208,7 @@ struct PhoneVerificationSection: View {
                     text: "Telegram orqali tasdiqlash",
                     onClick: { vm.start(name: name, account: container.account) },
                     enabled: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    loading: vm.step == .starting
+                    loading: vm.starting
                 )
             }
         }

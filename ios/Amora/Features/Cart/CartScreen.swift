@@ -123,6 +123,9 @@ struct CartScreen: View {
                 dismissLabel: "Orqaga",
                 onConfirm: { submit() }
             )
+            .onAppear {
+                vm.restoreDraft(container.cart)
+            }
             .task(id: quoteRequest) {
                 await vm.runQuote(quoteRequest, container: container)
             }

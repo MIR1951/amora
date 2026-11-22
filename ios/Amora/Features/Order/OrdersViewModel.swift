@@ -23,9 +23,15 @@ final class OrdersViewModel {
 
     static let pageSize = 20
 
+    // Har bir so'rov o'z raqami bilan ketadi: kechikib kelgan eski javob yangi holatni bosib ketmaydi
+    @ObservationIgnored private var reloadGeneration = 0
+    @ObservationIgnored private var moreGeneration = 0
+
     init() {}
 
     private func resetEmpty() {
+        reloadGeneration += 1
+        moreGeneration += 1
         loading = false
         refreshing = false
         loadingMore = false
@@ -44,9 +50,13 @@ final class OrdersViewModel {
         refreshing = byUser
         loading = orders.isEmpty && !byUser
         error = nil
+        reloadGeneration += 1
+        let generation = reloadGeneration
         Task {
             do {
                 let page = try await container.api.orders(limit: OrdersViewModel.pageSize, offset: 0)
+                // Shu orada yangi so'rov ketgan: bu javob eskirgan
+                guard generation == self.reloadGeneration else { return }
                 // "Yana ko'rsatish" bilan yuklangan eski buyurtmalar ro'yxatda qoladi:
                 // buyurtmani ochib qaytgan mijoz ro'yxatni yana boshidan varaqlamaydi
                 let freshIds = Set(page.orders.map { $0.id })
@@ -55,15 +65,16 @@ final class OrdersViewModel {
                 self.orders = page.orders + tail
                 self.loading = false
                 self.refreshing = false
-                self.loadingMore = false
                 self.error = nil
             } catch {
+                guard generation == self.reloadGeneration else { return }
                 guard let apiError = ApiError.from(error) else {
                     self.loading = false
                     self.refreshing = false
                     return
                 }
                 if apiError.isUnauthorized {
+                    // Telefon hisobdan chiqdi (`ApiClient.onUnauthorized`): ro'yxat bo'shaydi
                     self.resetEmpty()
                 } else {
                     self.loading = false
@@ -78,14 +89,18 @@ final class OrdersViewModel {
         if loadingMore || !hasMore { return }
         loadingMore = true
         let offset = orders.count
+        moreGeneration += 1
+        let generation = moreGeneration
         Task {
             do {
                 let page = try await container.api.orders(limit: OrdersViewModel.pageSize, offset: offset)
+                guard generation == self.moreGeneration else { return }
                 let known = Set(self.orders.map { $0.id })
                 self.orders = self.orders + page.orders.filter { !known.contains($0.id) }
                 self.hasMore = page.hasMore
                 self.loadingMore = false
             } catch {
+                guard generation == self.moreGeneration else { return }
                 self.loadingMore = false
                 if let apiError = ApiError.from(error) {
                     self.error = apiError.message

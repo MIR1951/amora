@@ -8,7 +8,9 @@
 ///   - `func onForeground()`, `func onBackground()`
 ///   - `func setVisibleOrder(_ orderId: Int, status: String? = nil)`   // order screen visible: no notification for it
 ///   - `func clearVisibleOrder(_ orderId: Int)`
-///   - `func onPush(_ change: OrderChange)`                            // for a future push integration
+///   - `func onPush(_ change: OrderChange)`                            // APNs order push received in foreground
+///   - `private(set) var resyncCount: Int`                             // number of `.resync` events handled
+///   - `func resetNotified()`                                          // account deleted
 ///   - `func orderPlaced()`                                            // call after a successful createOrder
 /// - `func isNewerStatus(_ last: String?, _ status: String) -> Bool`
 
@@ -29,8 +31,19 @@ final class LiveUpdates {
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     private var listenTask: Task<Void, Never>?
 
-    /// Har bir buyurtma bo'yicha mijozga oxirgi bildirilgan (yoki ekranda ko'rsatilgan) holat
-    private var notified: [Int: String] = [:]
+    /// Har bir buyurtma bo'yicha mijozga oxirgi bildirilgan (yoki ekranda ko'rsatilgan) holat.
+    /// Telefonda saqlanadi: ilova yopilib ochilganda aytib bo'lingan holat qayta aytilmaydi.
+    private var notified: [Int: String] = LiveUpdates.loadNotified() {
+        didSet { LiveUpdates.saveNotified(notified) }
+    }
+
+    /// Nechta "resync" (jonli ulanish o'rnatildi) qayta ishlangan. `AppContainer` ilova ochilganda
+    /// shunga qaraydi: ulanish o'zi hammasini qayta o'qigan bo'lsa, ikkinchi marta o'qimaydi.
+    private(set) var resyncCount = 0
+
+    private static let notifiedKey = "amora.live.notified"
+    // Eski buyurtmalar yig'ilib qolmasin: eng oxirgi shuncha buyurtma saqlanadi
+    private static let notifiedLimit = 20
 
     private static let backgroundLingerNs: UInt64 = 20 * 60 * 1_000_000_000
 
@@ -73,6 +86,7 @@ final class LiveUpdates {
     private func handle(_ event: LiveEvent) {
         switch event {
         case .resync:
+            resyncCount += 1
             Task { await catalog.refresh() }
             Task { await refreshActiveOrders() }
         case .menuChanged, .shopChanged:
@@ -89,13 +103,19 @@ final class LiveUpdates {
         lingerTask?.cancel()
         lingerTask = nil
         endBackgroundTime()
-        realtime.start()
+        // Orqa fonda ushlab turilgan ulanish tizim ilovani to'xtatgan paytda o'lgan bo'lishi mumkin:
+        // yangidan ulanamiz. Yangi ulanish "resync" yuboradi va menyu, faol buyurtmalar bir marta o'qiladi
+        if realtime.isRunning {
+            realtime.restart()
+        } else {
+            realtime.start()
+        }
     }
 
     /// Ilova orqa fonga o'tdi. Faol buyurtma bo'lsa, ulanish tizim ruxsat bergancha ushlab turiladi
     /// (iOS odatda ~30 soniya beradi; 20 daqiqa faqat yuqori chegara). Undan keyingi o'zgarishlar
     /// ilova qayta ochilganda aytiladi (`ActiveOrders` oxirgi holatlarni saqlaydi). Ilova yopiq
-    /// paytdagi bildirishnoma uchun APNs push kerak (Apple Developer akkaunti bilan qo'shiladi).
+    /// paytda bildirishnomani server APNs push orqali yuboradi (`PushTokens`).
     func onBackground() {
         foreground = false
         lingerTask?.cancel()
@@ -159,9 +179,10 @@ final class LiveUpdates {
         if visibleOrderId == orderId { visibleOrderId = nil }
     }
 
-    /// Push orqali kelgan holat. Jonli ulanish orqali kelgan xuddi shu xabar bilan ikkilanmaydi.
+    /// Ilova ochiq paytda APNs push orqali kelgan holat (tizim banneri ko'rsatilmaydi, bildirishnomani
+    /// ilova o'zi chiqaradi). Jonli ulanish orqali kelgan xuddi shu xabar bilan ikkilanmaydi.
     func onPush(_ change: OrderChange) {
-        notify(change)
+        notify(change, fromPush: true)
         Task { await refreshActiveOrders() }
     }
 
@@ -172,12 +193,39 @@ final class LiveUpdates {
 
     /// Holat o'zgarishi haqida bildiradi. Bitta o'zgarish ikki yo'ldan kelishi mumkin: ikkinchisi va
     /// kechikib kelgan eski holat e'tiborsiz qoldiriladi.
-    private func notify(_ change: OrderChange) {
+    private func notify(_ change: OrderChange, fromPush: Bool = false) {
         if !isNewerStatus(notified[change.orderId], change.status) { return }
         notified[change.orderId] = change.status
         // Mijoz aynan shu buyurtma ekraniga qarab turgan bo'lsa, o'zgarishni ekranda ko'radi
         if foreground && visibleOrderId == change.orderId { return }
-        notifier.show(change)
+        // Ilova yopiq paytda shu holat haqida push kelgan va u hali bildirishnomalar markazida turgan
+        // bo'lishi mumkin: o'shanda ikkinchi marta ovoz chiqarilmaydi. Hozirgina kelgan pushni esa
+        // tizim ko'rsatmagan: uni ilova o'zi chiqaradi
+        notifier.show(change, skipIfDelivered: !fromPush)
+    }
+
+    /// Hisob o'chirildi: kimga nima bildirilgani ham unutiladi.
+    func resetNotified() {
+        notified = [:]
+    }
+
+    private static func loadNotified() -> [Int: String] {
+        guard let saved = UserDefaults.standard.dictionary(forKey: notifiedKey) as? [String: String] else {
+            return [:]
+        }
+        var result: [Int: String] = [:]
+        for (key, status) in saved {
+            if let id = Int(key) { result[id] = status }
+        }
+        return result
+    }
+
+    private static func saveNotified(_ notified: [Int: String]) {
+        var saved: [String: String] = [:]
+        for id in notified.keys.sorted(by: >).prefix(notifiedLimit) {
+            saved[String(id)] = notified[id]
+        }
+        UserDefaults.standard.set(saved, forKey: notifiedKey)
     }
 
     private func refreshActiveOrders() async {

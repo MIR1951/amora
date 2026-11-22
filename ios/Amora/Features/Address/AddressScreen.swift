@@ -49,6 +49,13 @@ private enum AddressConst {
     static let locationOffNotice =
         "Telefonda joylashuv (GPS) o'chirilgan. Uni yoqing yoki manzilni xaritadan qo'lda tanlang."
     static let locateFailedNotice = "Joylashuvni aniqlab bo'lmadi. Manzilni xaritadan qo'lda tanlang."
+    static let approximateNotice =
+        "Joylashuv taxminiy aniqlandi. Xaritani yaqinlashtirib, belgini yetkazish joyiga o'zingiz qo'ying."
+    // Taxminiy joylashuvda xarita shu darajada ochiladi: atrof ko'rinadi, aniq nuqta esa da'vo qilinmaydi.
+    // `minConfirmZoom` dan uzoqroq: mijoz yaqinlashtirib, joyni o'zi belgilamaguncha tasdiqlab bo'lmaydi
+    static let approximateZoom = 13.0
+    // Mijoz shunchalik yaqinlashtirgach, taxminiy joylashuv haqidagi eslatma o'chadi
+    static let approximateNoticeZoom = 15.0
     static let deniedNotice = "Joylashuvga ruxsat berilmadi. Manzilni xaritadan qo'lda tanlang."
     static let outOfZoneWarning = "Bu joy yetkazish hududidan tashqarida. Belgini doira ichiga suring."
     static let settingsAction = "Joylashuv sozlamalarini ochish"
@@ -173,6 +180,9 @@ final class AddressScreenModel {
         if notice == AddressConst.zoomNotice && zoom >= AddressConst.minConfirmZoom {
             notice = nil
         }
+        if notice == AddressConst.approximateNotice && zoom >= AddressConst.approximateNoticeZoom {
+            notice = nil
+        }
         if !ended && Date() >= liftAfter {
             if !moving {
                 moving = true
@@ -254,20 +264,28 @@ final class AddressScreenModel {
         defer { locating = false }
         let lastKnown = finder.lastKnown()
         if let lastKnown {
-            show(lastKnown)
+            show(lastKnown, approximate: finder.isApproximate(lastKnown))
         }
         let current = await finder.current()
         if let current {
-            show(current)
+            show(current, approximate: finder.isApproximate(current))
         } else if lastKnown == nil {
             notice = AddressConst.locateFailedNotice
         }
     }
 
-    private func show(_ location: CLLocation) {
+    /// `approximate`: mijoz faqat taxminiy joylashuvga ruxsat bergan yoki telefon joyni aniq topa olmadi.
+    /// Bunda xarita kengroq ochiladi, "men shu yerdaman" nuqtasi ko'rsatilmaydi va mijozga belgini
+    /// o'zi qo'yishi aytiladi: bir necha kilometr adashgan nuqta manzil bo'lib ketmasin.
+    private func show(_ location: CLLocation, approximate: Bool) {
         let point = location.coordinate
-        myLocation = point
-        let target = region(point, zoom: AddressConst.streetZoom)
+        myLocation = approximate ? nil : point
+        if approximate {
+            notice = AddressConst.approximateNotice
+        } else if notice == AddressConst.approximateNotice {
+            notice = nil
+        }
+        let target = region(point, zoom: approximate ? AddressConst.approximateZoom : AddressConst.streetZoom)
         withAnimation(.easeInOut(duration: 0.7)) {
             position = .region(target)
         }

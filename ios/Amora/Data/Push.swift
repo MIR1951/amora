@@ -7,6 +7,8 @@
 /// Surface:
 /// - `@MainActor final class PushTokenInbox` (`static let shared`): `receive(_ token:)` from the app delegate,
 ///   `attach(_ handler:)` from AppContainer (the last token received before attach is delivered then)
+/// - `@MainActor final class OrderPushInbox` (`static let shared`): `receive(_ change:)` from the notification
+///   delegate (APNs order push while the app is open), `attach(_ handler:)` from AppContainer (-> LiveUpdates.onPush)
 /// - `@MainActor final class PushTokens`
 ///   - `init(api: ApiClient, session: SessionStore)`
 ///   - `func start()`                       // subscribe to auth-token changes (called by AppContainer)
@@ -69,7 +71,8 @@ final class PushTokens {
     private func syncOnce() async {
         guard let pushToken = session.pushToken, let authToken = session.token else { return }
         // Qaysi manzil qaysi kalit bilan yuborilgani: yuborish paytida manzil yangilansa, yangisi ham yuboriladi
-        let sent = "\(authToken)|\(pushToken)"
+        // Telefonda juftlikning o'zi emas, xeshi saqlanadi: kirish kaliti UserDefaults'ga tushmaydi
+        let sent = sha256Hex("\(authToken)|\(pushToken)")
         if session.pushTokenSentWith == sent { return }
         do {
             _ = try await api.updatePushToken(pushToken)
@@ -102,6 +105,33 @@ final class PushTokenInbox {
         if let token = pending {
             pending = nil
             handler(token)
+        }
+    }
+}
+
+/// Ilova ochiq paytda kelgan buyurtma pushi bildirishnomalar delegatidan keladi, `LiveUpdates` esa
+/// `AppContainer` ichida: ular orasidagi ko'prik. Container tayyor bo'lguncha kelganlari saqlab turiladi.
+@MainActor
+final class OrderPushInbox {
+    static let shared = OrderPushInbox()
+
+    private var pending: [OrderChange] = []
+    private var handler: ((OrderChange) -> Void)?
+
+    func receive(_ change: OrderChange) {
+        if let handler {
+            handler(change)
+        } else {
+            pending.append(change)
+        }
+    }
+
+    func attach(_ handler: @escaping (OrderChange) -> Void) {
+        self.handler = handler
+        let waiting = pending
+        pending = []
+        for change in waiting {
+            handler(change)
         }
     }
 }

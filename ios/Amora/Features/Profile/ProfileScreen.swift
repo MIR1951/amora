@@ -3,7 +3,8 @@
 /// Surface:
 /// - `struct ProfileScreen: View` - `ProfileScreen(quickEdit: Bool)`
 ///   `quickEdit == false` (Route.profile): header, name, phone verification, delivery address, cafe phone,
-///   notifications, version. `quickEdit == true` (Route.profileEdit, from the cart): only name + phone,
+///   notifications, sign out / delete account (signed-in customers only, each behind a confirmation dialog),
+///   version. `quickEdit == true` (Route.profileEdit, from the cart): only name + phone,
 ///   bottom "Saqlash", goes back by itself once the phone is verified.
 
 import SwiftUI
@@ -25,6 +26,11 @@ struct ProfileScreen: View {
     @State private var toast = ToastCenter()
     @State private var name = ""
     @State private var nameLoaded = false
+    @State private var savingName = false
+    @State private var confirmSignOut = false
+    @State private var confirmDelete = false
+    // Chiqish yoki o'chirish so'rovi ketmoqda
+    @State private var accountBusy = false
     @FocusState private var nameFocused: Bool
 
     init(quickEdit: Bool = false) {
@@ -55,13 +61,65 @@ struct ProfileScreen: View {
     }
 
     private func save() {
-        guard canSaveName else { return }
-        container.account.saveName(cleanName)
+        guard canSaveName, !savingName else { return }
+        let account = container.account
+        let clean = cleanName
+        let toast = self.toast
         nameFocused = false
         if quickEdit {
+            // Savatdan ochilgan: kutmasdan qaytamiz. Ism buyurtma bilan birga ham yuboriladi, serverga
+            // yetmagan bo'lsa keyinroq o'zi qayta yuboriladi (`Account.refresh`)
+            Task {
+                _ = await account.saveName(clean)
+            }
             router.back()
-        } else {
-            toast.show("Saqlandi")
+            return
+        }
+        savingName = true
+        Task {
+            // "Saqlandi" faqat server qabul qilgach aytiladi; aks holda nima bo'lgani ko'rsatiladi
+            let problem = await account.saveName(clean)
+            savingName = false
+            toast.show(problem ?? "Saqlandi")
+        }
+    }
+
+    /// Hisobga kirilgan (kirish kaliti bor): chiqish va hisobni o'chirish shundagina ko'rinadi.
+    private var signedIn: Bool {
+        container.session.token != nil
+    }
+
+    private func signOut() {
+        if accountBusy { return }
+        accountBusy = true
+        nameFocused = false
+        let container = self.container
+        let toast = self.toast
+        Task {
+            await container.signOut()
+            accountBusy = false
+            toast.show("Hisobdan chiqdingiz")
+        }
+    }
+
+    private func deleteAccount() {
+        if accountBusy { return }
+        accountBusy = true
+        nameFocused = false
+        let container = self.container
+        let toast = self.toast
+        Task {
+            do {
+                try await container.deleteAccount()
+                accountBusy = false
+                toast.show("Hisobingiz o'chirildi")
+            } catch {
+                accountBusy = false
+                // Masalan, tugallanmagan buyurtma bor (409 has_active_orders): server xabari o'zicha ko'rsatiladi
+                if let apiError = ApiError.from(error) {
+                    toast.show(apiError.message)
+                }
+            }
         }
     }
 
@@ -102,13 +160,18 @@ struct ProfileScreen: View {
 
                 if !quickEdit {
                     // Tugma faqat biror narsa o'zgarganda chiqadi: o'zgarish bo'lmasa saqlaydigan narsa yo'q
-                    if canSave {
-                        BigButton(text: "Saqlash", onClick: { save() })
+                    if canSave || savingName {
+                        BigButton(text: "Saqlash", onClick: { save() }, loading: savingName)
                             .transition(.opacity)
                     }
 
                     SectionLabel("Yetkazish va aloqa")
                     linksCard
+
+                    if signedIn {
+                        SectionLabel("Hisob")
+                        accountButtons
+                    }
 
                     Text(versionText)
                         .amoraText(.bodySmall)
@@ -136,6 +199,23 @@ struct ProfileScreen: View {
         }
         .background(colors.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .confirmDialog(
+            isPresented: $confirmSignOut,
+            title: "Hisobdan chiqasizmi?",
+            text: "Buyurtma berish uchun raqamingizni Telegram orqali qayta tasdiqlashingiz kerak bo'ladi.",
+            confirmLabel: "Chiqish",
+            dismissLabel: "Bekor qilish",
+            onConfirm: { signOut() }
+        )
+        .confirmDialog(
+            isPresented: $confirmDelete,
+            title: "Hisobni o'chirasizmi?",
+            text: "Hisobingiz va shaxsiy ma'lumotlaringiz (ism, telefon raqam, manzil) o'chiriladi. "
+                + "Bu amalni ortga qaytarib bo'lmaydi.",
+            confirmLabel: "O'chirish",
+            dismissLabel: "Bekor qilish",
+            onConfirm: { deleteAccount() }
+        )
         // Saqlangan profil o'zgarsa (masalan, boshqa telefonda ism o'zgargan bo'lsa), maydon ham yangilanadi
         // Ekran qayta ko'ringanda (masalan, xaritadan qaytganda) yozilayotgan ism o'chib ketmasin:
         // maydon faqat birinchi marta va saqlangan ism haqiqatan o'zgarganda to'ldiriladi
@@ -241,6 +321,32 @@ struct ProfileScreen: View {
                 highlighted: !notificationsOn,
                 tileContainer: colors.infoContainer,
                 tileTint: colors.info
+            )
+        }
+    }
+
+    // MARK: - Hisob
+
+    /// Hisobdan chiqish va hisobni o'chirish (App Store talabi: hisob ochiladigan ilovada uni
+    /// o'chirish ham mumkin bo'lishi kerak). Har biri tasdiqlash oynasidan keyin bajariladi.
+    private var accountButtons: some View {
+        VStack(spacing: 10) {
+            SoftButton(
+                text: "Chiqish",
+                onClick: {
+                    nameFocused = false
+                    confirmSignOut = true
+                },
+                enabled: !accountBusy
+            )
+            SoftButton(
+                text: accountBusy ? "Kutib turing…" : "Hisobni o'chirish",
+                onClick: {
+                    nameFocused = false
+                    confirmDelete = true
+                },
+                enabled: !accountBusy,
+                danger: true
             )
         }
     }

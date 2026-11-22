@@ -8,6 +8,9 @@
 /// - `@MainActor final class ApiClient`
 ///   - `init(baseUrl: String, tokenProvider: @escaping @MainActor () -> String?)`
 ///   - `let baseUrl: String`
+///   - `var onUnauthorized: (@MainActor (String) -> Void)?`   // a request sent WITH this token got 401
+///   - `func logout() async throws`                            // POST /auth/logout -> 204
+///   - `func deleteAccount() async throws`                     // DELETE /me -> 204 (409 `has_active_orders`)
 ///   - `func menu() async throws -> MenuData`
 ///   - `func shop() async throws -> Shop`
 ///   - `func startTelegramVerification(name: String?) async throws -> TelegramStart`
@@ -77,6 +80,9 @@ final class ApiClient {
     let baseUrl: String
     private let apiUrl: String
     private let tokenProvider: @MainActor () -> String?
+    /// Server kirish kalitini tanimadi (401). Qaysi kalit yuborilgani beriladi: shu orada yangi kalit
+    /// olingan bo'lsa, eski kalitning xatosi uni o'chirmasligi kerak. Hamma so'rovlar uchun bitta joy.
+    var onUnauthorized: (@MainActor (String) -> Void)?
     private let session: URLSession
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
@@ -135,6 +141,16 @@ final class ApiClient {
         try await call("PATCH", "/me", Customer.self, body: encode(PushTokenUpdate(fcmToken: token)), auth: true)
     }
 
+    /// Hisobdan chiqish: server shu telefonning kalitini bekor qiladi.
+    func logout() async throws {
+        _ = try await send("POST", "/auth/logout", body: Data(), auth: true)
+    }
+
+    /// Hisobni o'chirish. Tugallanmagan buyurtma bo'lsa server 409 `has_active_orders` qaytaradi.
+    func deleteAccount() async throws {
+        _ = try await send("DELETE", "/me", body: nil, auth: true)
+    }
+
     // MARK: Buyurtma
 
     /// Token bo'lsa yuboriladi: server birinchi buyurtma chegirmasini va promokodni to'g'ri hisoblaydi.
@@ -191,6 +207,20 @@ final class ApiClient {
         body: Data? = nil,
         auth: Bool = false
     ) async throws -> T {
+        let data = try await send(method, path, body: body, auth: auth)
+        do {
+            return try decoder.decode(type, from: data)
+        } catch {
+            throw ApiError(
+                status: 200,
+                code: ApiError.codeBadResponse,
+                message: "Serverdan tushunarsiz javob keldi. Birozdan keyin qayta urinib ko'ring"
+            )
+        }
+    }
+
+    /// So'rovni yuboradi va muvaffaqiyatli (2xx) javobning matnini qaytaradi (204 da bo'sh).
+    private func send(_ method: String, _ path: String, body: Data?, auth: Bool) async throws -> Data {
         guard let url = URL(string: apiUrl + path) else {
             throw ApiError(
                 status: nil,
@@ -201,8 +231,10 @@ final class ApiClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        var sentToken: String?
         if auth, let token = tokenProvider(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            sentToken = token
         }
         if method != "GET" {
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -226,15 +258,10 @@ final class ApiClient {
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if (200...299).contains(status) {
-            do {
-                return try decoder.decode(type, from: data)
-            } catch {
-                throw ApiError(
-                    status: status,
-                    code: ApiError.codeBadResponse,
-                    message: "Serverdan tushunarsiz javob keldi. Birozdan keyin qayta urinib ko'ring"
-                )
-            }
+            return data
+        }
+        if status == 401, let sentToken {
+            onUnauthorized?(sentToken)
         }
         throw parseError(status: status, data: data)
     }
