@@ -17,6 +17,10 @@ class MenuViewModel(private val container: AppContainer) : ViewModel() {
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    // Bir martalik xabar: menyu ekranda turganda yangilab bo'lmadi
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
     private var catalogJob: Job? = null
 
     /** Ekran ochilganda yoki ilovaga qaytilganda menyuni yangilaydi. */
@@ -37,11 +41,18 @@ class MenuViewModel(private val container: AppContainer) : ViewModel() {
             _refreshing.value = true
             try {
                 container.catalog.refresh()
+                // Avval yuklangan menyu ekranda qoladi: yangilanmaganini mijoz bilishi kerak
+                val catalog = container.catalog.state.value
+                if (catalog.menu != null && catalog.error != null) _message.value = catalog.error
                 container.activeOrders.refresh()
             } finally {
                 _refreshing.value = false
             }
         }
+    }
+
+    fun clearMessage() {
+        _message.value = null
     }
 
     fun refreshActiveOrders() {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -70,6 +72,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -86,6 +89,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -332,32 +336,57 @@ fun RoundButton(
     }
 }
 
+/**
+ * Ko'rinishi kichik tugmaning bosiladigan qatlami: barmoq uchun kamida 48dp joy oladi, lekin
+ * joylashuvda tugmaning o'zi egallagan joy o'zgarmaydi (qatlam tugma atrofiga teng chiqib turadi).
+ * `matchParentSize()` dan keyin, `clickable` dan oldin qo'yiladi.
+ */
+fun Modifier.expandTouchArea(minSize: Dp = 48.dp): Modifier = layout { measurable, constraints ->
+    val width = constraints.maxWidth
+    val height = constraints.maxHeight
+    val touchWidth = maxOf(width, minSize.roundToPx())
+    val touchHeight = maxOf(height, minSize.roundToPx())
+    val placeable = measurable.measure(Constraints.fixed(touchWidth, touchHeight))
+    layout(width, height) {
+        placeable.place((width - touchWidth) / 2, (height - touchHeight) / 2)
+    }
+}
+
 /** Taom kartochkasidagi "+" tugmasi: bosilganda taom savatga tushadi. */
 @Composable
 fun AddButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     val source = remember { MutableInteractionSource() }
-    Box(
-        modifier = modifier
-            .size(38.dp)
-            .pressScale(source, 0.88f)
-            .clip(RoundedCornerShape(13.dp))
-            .background(scheme.surfaceVariant)
-            .clickable(
-                interactionSource = source,
-                indication = LocalIndication.current,
-                onClickLabel = "Qo'shish",
-                role = Role.Button,
-                onClick = onClick,
+    Box(modifier = modifier.size(38.dp)) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .pressScale(source, 0.88f)
+                .clip(RoundedCornerShape(13.dp))
+                .background(scheme.surfaceVariant)
+                .indication(source, LocalIndication.current),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_plus),
+                contentDescription = null,
+                tint = scheme.onSurface,
+                modifier = Modifier.size(22.dp),
             )
-            .semantics { contentDescription = "Qo'shish" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_plus),
-            contentDescription = null,
-            tint = scheme.onSurface,
-            modifier = Modifier.size(22.dp),
+        }
+        // Tugma 38dp ko'rinadi, bosiladigan joyi 48dp
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .expandTouchArea()
+                .clickable(
+                    interactionSource = source,
+                    indication = null,
+                    onClickLabel = "Qo'shish",
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .semantics { contentDescription = "Qo'shish" },
         )
     }
 }
@@ -384,11 +413,11 @@ fun QuantityStepper(
     val scheme = MaterialTheme.colorScheme
     val container = if (tonal) scheme.surfaceVariant else scheme.primary
     val content = if (tonal) scheme.onSurface else scheme.onPrimary
+    // Fon kesilmaydi (clip yo'q): "−" va "+" ning bosiladigan joyi tanlagichdan biroz tashqariga chiqadi
     Row(
         modifier = modifier
             .height(height)
-            .clip(RoundedCornerShape(corner))
-            .background(container),
+            .background(container, RoundedCornerShape(corner)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StepperButton(
@@ -396,10 +425,13 @@ fun QuantityStepper(
             label = "Kamaytirish",
             width = buttonWidth,
             tint = content,
+            shape = RoundedCornerShape(topStart = corner, bottomStart = corner),
             onClick = onMinus,
         )
         Box(
-            modifier = if (expand) Modifier.weight(1f) else Modifier.widthIn(min = 16.dp),
+            modifier = (if (expand) Modifier.weight(1f) else Modifier.widthIn(min = 16.dp))
+                .fillMaxHeight()
+                .clipToBounds(),
             contentAlignment = Alignment.Center,
         ) {
             AnimatedContent(
@@ -423,22 +455,50 @@ fun QuantityStepper(
             label = "Ko'paytirish",
             width = buttonWidth,
             tint = if (tonal) scheme.primary else content,
+            shape = RoundedCornerShape(topEnd = corner, bottomEnd = corner),
             onClick = onPlus,
         )
     }
 }
 
+/** Ko'rinishi tor ([width]), lekin bosiladigan joyi kamida 48dp. [shape]: bosilgandagi to'lqin chegarasi. */
 @Composable
-private fun StepperButton(@DrawableRes icon: Int, label: String, width: Dp, tint: Color, onClick: () -> Unit) {
+private fun StepperButton(
+    @DrawableRes icon: Int,
+    label: String,
+    width: Dp,
+    tint: Color,
+    shape: Shape,
+    onClick: () -> Unit,
+) {
+    val source = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .width(width)
-            .fillMaxHeight()
-            .clickable(onClickLabel = label, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
+            .fillMaxHeight(),
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(shape)
+                .indication(source, LocalIndication.current),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        }
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .expandTouchArea()
+                .clickable(
+                    interactionSource = source,
+                    indication = null,
+                    onClickLabel = label,
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .semantics { contentDescription = label },
+        )
     }
 }
 

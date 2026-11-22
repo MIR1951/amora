@@ -1,5 +1,6 @@
 /// Server JSON models (port of android data/Models.kt). Field names match backend/app/schemas.py.
-/// Decoding is lenient: missing/null/mistyped optional fields fall back to the Kotlin defaults,
+/// Decoding is lenient: missing/null/mistyped optional fields fall back to the Kotlin defaults, lists are
+/// decoded element by element (one malformed element is dropped, the rest of the list survives),
 /// unknown keys are ignored, order statuses are plain strings (unknown values survive).
 ///
 /// Surface (all `Codable, Equatable, Hashable` structs with `var` properties + memberwise init):
@@ -48,6 +49,21 @@ extension KeyedDecodingContainer {
     /// Missing, null or mistyped value -> `fallback`.
     func lenient<T: Decodable>(_ type: T.Type, _ key: Key, _ fallback: T) -> T {
         lenientOptional(type, key) ?? fallback
+    }
+
+    /// Array decoded element by element: a malformed element is dropped, the rest survive.
+    /// Missing, null or non-array value -> [].
+    func lenientArray<T: Decodable>(_ type: T.Type, _ key: Key) -> [T] {
+        (lenientOptional([LossyElement<T>].self, key) ?? []).compactMap { $0.value }
+    }
+}
+
+/// Ro'yxatning bitta elementi: o'qib bo'lmasa nil (butun ro'yxat bo'shab qolmaydi).
+private struct LossyElement<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: Decoder) throws {
+        value = try? T(from: decoder)
     }
 }
 
@@ -114,8 +130,8 @@ struct MenuData: Codable, Equatable, Hashable {
 extension MenuData {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        categories = c.lenient([Category].self, .categories, [])
-        products = c.lenient([Product].self, .products, [])
+        categories = c.lenientArray(Category.self, .categories)
+        products = c.lenientArray(Product.self, .products)
     }
 }
 
@@ -371,13 +387,13 @@ struct Quote: Codable, Equatable, Hashable {
 extension Quote {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        lines = c.lenient([QuoteLine].self, .lines, [])
+        lines = c.lenientArray(QuoteLine.self, .lines)
         itemsTotal = c.lenient(Int.self, .itemsTotal, 0)
         deliveryFee = c.lenient(Int.self, .deliveryFee, 0)
         total = c.lenient(Int.self, .total, 0)
         distanceKm = c.lenientOptional(Double.self, .distanceKm)
         canOrder = c.lenient(Bool.self, .canOrder, false)
-        problems = c.lenient([Problem].self, .problems, [])
+        problems = c.lenientArray(Problem.self, .problems)
         discount = c.lenient(Int.self, .discount, 0)
         promoTitle = c.lenientOptional(String.self, .promoTitle)
         promoError = c.lenientOptional(String.self, .promoError)
@@ -510,7 +526,7 @@ extension Order {
         statusLabel = c.lenient(String.self, .statusLabel, "")
         isActive = c.lenient(Bool.self, .isActive, false)
         canCancel = c.lenient(Bool.self, .canCancel, false)
-        items = c.lenient([OrderItem].self, .items, [])
+        items = c.lenientArray(OrderItem.self, .items)
         itemsTotal = c.lenient(Int.self, .itemsTotal, 0)
         deliveryFee = c.lenient(Int.self, .deliveryFee, 0)
         discount = c.lenient(Int.self, .discount, 0)
@@ -525,7 +541,7 @@ extension Order {
         rejectReason = c.lenientOptional(String.self, .rejectReason)
         createdAt = c.lenient(String.self, .createdAt, "")
         updatedAt = c.lenient(String.self, .updatedAt, "")
-        history = c.lenient([StatusEvent].self, .history, [])
+        history = c.lenientArray(StatusEvent.self, .history)
     }
 }
 
@@ -542,7 +558,7 @@ struct OrderList: Codable, Equatable, Hashable {
 extension OrderList {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        orders = c.lenient([Order].self, .orders, [])
+        orders = c.lenientArray(Order.self, .orders)
         hasMore = c.lenient(Bool.self, .hasMore, false)
     }
 }

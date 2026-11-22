@@ -41,6 +41,10 @@ NOTIFY_STATUSES = {
 _DEAD_TOKEN_CODES = {"UNREGISTERED", "INVALID_ARGUMENT", "NOT_FOUND", "SENDER_ID_MISMATCH"}
 
 
+# Tarmoq xatosidan keyin bir marta qayta urinishdan oldingi kutish (soniya)
+RETRY_DELAY = 1.0
+
+
 class PushError(Exception):
     pass
 
@@ -321,12 +325,20 @@ async def notify_order_status(
                 jobs.append((device_id, token, "fcm", order_message(token, order)))
     delivered = False
     dead: list[tuple[int, str]] = []
+    async def send_one(token: str, kind: str, message: dict) -> str | None:
+        if kind == "apns":
+            return await sender.send_apns(token, message, collapse_id=f"order-{order_id}")
+        return await sender.send(message)
+
     for device_id, token, kind, message in jobs:
         try:
-            if kind == "apns":
-                result = await sender.send_apns(token, message, collapse_id=f"order-{order_id}")
-            else:
-                result = await sender.send(message)
+            try:
+                result = await send_one(token, kind, message)
+            except (aiohttp.ClientError, httpx.HTTPError, TimeoutError) as error:
+                # Tarmoq bir lahzaga uzilgan bo'lishi mumkin: "kuryer yo'lda" xabari yo'qolmasin
+                log.info("Buyurtma #%s: push qayta yuboriladi (%s)", order_id, error)
+                await asyncio.sleep(RETRY_DELAY)
+                result = await send_one(token, kind, message)
         except (PushError, ApnsError, aiohttp.ClientError, httpx.HTTPError, TimeoutError) as error:
             log.warning("Buyurtma #%s haqida push yuborilmadi: %s", order_id, error)
             continue

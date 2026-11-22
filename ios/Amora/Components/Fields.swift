@@ -1,4 +1,4 @@
-/// Text input styling (port of fieldColors / fieldBorder / PhoneVisualTransformation from
+/// Text input styling (port of fieldColors / fieldBorder from
 /// android ui/components/Components.kt).
 ///
 /// Surface:
@@ -8,9 +8,6 @@
 /// - `View.fieldBorder(cornerRadius: CGFloat = 18)` - only the thin outlineVariant border
 /// - `fieldPrompt(_ text: String, _ colors: AmoraColors) -> Text` - placeholder in the hint color:
 ///     `TextField("", text: $name, prompt: fieldPrompt("Ismingiz", colors))`
-/// - `enum PhoneVisualTransformation`
-///     `static func format(_ digits: String) -> String`               // "901234567" -> "90 123 45 67"
-///     `static func binding(_ digits: Binding<String>) -> Binding<String>`  // field shows spaced, stores max 9 digits
 
 import SwiftUI
 
@@ -76,35 +73,4 @@ extension View {
 /// Maydon bo'sh paytdagi xira yozuv.
 func fieldPrompt(_ text: String, _ colors: AmoraColors) -> Text {
     Text(text).foregroundColor(colors.hint)
-}
-
-/// Telefon raqamni "90 123 45 67" ko'rinishida ko'rsatadi (maydonda faqat 9 ta raqam saqlanadi).
-enum PhoneVisualTransformation {
-    static let maxDigits = 9
-
-    /// "901234567" -> "90 123 45 67" (to'liq bo'lmasa ham shu tartibda).
-    static func format(_ digits: String) -> String {
-        var result = ""
-        for (index, char) in digits.enumerated() {
-            if index == 2 || index == 5 || index == 7 {
-                result.append(" ")
-            }
-            result.append(char)
-        }
-        return result
-    }
-
-    /// Faqat raqamlar, ko'pi bilan 9 ta.
-    static func digitsOnly(_ text: String) -> String {
-        let digits = text.filter { $0.isASCII && $0.isNumber }
-        return String(digits.prefix(maxDigits))
-    }
-
-    /// TextField uchun: maydonda bo'shliqlar bilan ko'rinadi, `digits` ga faqat raqamlar yoziladi.
-    static func binding(_ digits: Binding<String>) -> Binding<String> {
-        Binding<String>(
-            get: { format(digits.wrappedValue) },
-            set: { digits.wrappedValue = digitsOnly($0) }
-        )
-    }
 }

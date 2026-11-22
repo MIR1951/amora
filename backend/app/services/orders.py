@@ -1,7 +1,7 @@
 """Buyurtma qoidalari. API ham, Telegram bot ham shu funksiyalardan foydalanadi."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
+from app.db import utcnow
 from app.errors import ApiError
 from app.models import (
     ACTIVE_STATUSES,
@@ -226,6 +227,10 @@ async def create_order(
     name = data.name or customer.name
     telegram_id = customer.telegram_user_id
 
+    # Bitta mijozning buyurtmalari navbat bilan yaratiladi: ikki so'rov bir vaqtda kelsa ham
+    # faol buyurtmalar chegarasi va "promokod bir marta" qoidasi buzilmaydi
+    await session.execute(select(Customer.id).where(Customer.id == customer_id).with_for_update())
+
     if customer.is_blocked or await is_phone_blocked(session, phone):
         raise ApiError(403, "blocked", "Buyurtma berish imkoni cheklangan. Kafe bilan bog'laning")
 
@@ -246,6 +251,23 @@ async def create_order(
             "too_many_active_orders",
             "Sizda tugallanmagan buyurtmalar bor. Ular yetkazilgach, yana buyurtma bera olasiz",
         )
+
+    # Buyurtma berib, darhol bekor qilib turish bilan guruhni xabarga to'ldirib bo'lmasin
+    if cfg.max_orders_per_hour:
+        recent = await session.scalar(
+            select(func.count())
+            .select_from(Order)
+            .where(
+                Order.customer_id == customer_id,
+                Order.created_at >= utcnow() - timedelta(hours=1),
+            )
+        )
+        if recent >= cfg.max_orders_per_hour:
+            raise ApiError(
+                429,
+                "too_many_orders",
+                "Qisqa vaqt ichida juda ko'p buyurtma berildi. Birozdan keyin qayta urinib ko'ring",
+            )
 
     quote = await compute_quote(
         session,

@@ -9,7 +9,11 @@
 ///   - `func runQuote(_ request: CartQuoteRequest, container: AppContainer) async`
 ///   - `func refreshQuote()`, `func setPromoInput(_:)`, `func applyPromo()`, `func removePromo()`,
 ///     `func setComment(_:)`, `func clearSubmitError()`
+///   - `func restoreDraft(_ cart: CartStore)`   // comment/promo of an order whose result is still unknown
 ///   - `func submit(_ container: AppContainer, onCreated: @escaping @MainActor (Int) -> Void)`
+///
+/// The idempotency key (`client_order_id`) lives in `CartStore.pendingOrder` (persisted), not here: it must
+/// survive the screen being closed and the app being killed while the outcome of a submit is unknown.
 
 import Foundation
 import Observation
@@ -45,10 +49,7 @@ final class CartViewModel {
     // Qiymati o'zgarsa, summa serverdan qayta so'raladi
     private(set) var refreshTick: Int = 0
 
-    // Bitta buyurtma uchun bitta kalit: internet uzilib qayta yuborilsa, buyurtma ikkilanmaydi.
-    // Savat, manzil yoki izoh o'zgarsa, bu endi boshqa buyurtma: kalit ham yangilanadi.
-    @ObservationIgnored private var clientOrderId: String = UUID().uuidString
-    @ObservationIgnored private var orderFingerprint: String = ""
+    @ObservationIgnored private var draftRestored = false
 
     static let quoteDebounceNanos: UInt64 = 300_000_000
     static let maxCommentLength = 500
@@ -138,6 +139,22 @@ final class CartViewModel {
         submitError = nil
     }
 
+    /// Oldingi urinishda javob kelmay qolgan (internet uzildi, ilova yopildi) buyurtmaning izohi va
+    /// promokodi qayta tiklanadi: mijoz "Buyurtma berish"ni yana bossa, mazmun va kalit o'sha-o'sha
+    /// bo'ladi va server ikkinchi buyurtma ochmaydi.
+    func restoreDraft(_ cart: CartStore) {
+        if draftRestored { return }
+        draftRestored = true
+        guard let pending = cart.pendingOrder, !cart.isEmpty else { return }
+        if comment.isEmpty {
+            comment = pending.comment
+        }
+        if appliedPromo == nil, let promo = pending.promo, !promo.isEmpty {
+            promoInput = promo
+            appliedPromo = promo
+        }
+    }
+
     func submit(_ container: AppContainer, onCreated: @escaping @MainActor (Int) -> Void) {
         if submitting {
             return
@@ -161,11 +178,18 @@ final class CartViewModel {
         let promo: String? = quote.promoError == nil ? appliedPromo : nil
         let itemsKey = lines.map { "\($0.productId)x\($0.quantity)" }.joined(separator: ",")
         let addressKey = "\(address.latitude),\(address.longitude),\(address.note)"
-        let fingerprint = "\(itemsKey)|\(addressKey)|\(comment)|\(profile.phone)|\(promo ?? "null")"
-        if fingerprint != orderFingerprint {
-            orderFingerprint = fingerprint
-            clientOrderId = UUID().uuidString
-        }
+        // Bitta buyurtma uchun bitta kalit: internet uzilib qayta yuborilsa, buyurtma ikkilanmaydi (server
+        // mijoz + kalit bo'yicha avvalgisini qaytaradi). Savat, manzil, izoh yoki promokod o'zgarsa, bu
+        // endi boshqa buyurtma: kalit ham yangilanadi. Kalit telefonda saqlanadi va faqat serverdan aniq
+        // javob kelgach o'chiriladi. Telefonda mazmunning o'zi emas, xeshi turadi
+        let fingerprint = sha256Hex(
+            "\(itemsKey)|\(addressKey)|\(comment)|\(profile.phone)|\(promo ?? "null")"
+        )
+        let clientOrderId = container.cart.orderKey(
+            fingerprint: fingerprint,
+            comment: self.comment,
+            promo: appliedPromo
+        )
         let order = OrderIn(
             items: lines.map { CartItemIn(productId: $0.productId, quantity: $0.quantity) },
             latitude: address.latitude,
@@ -187,7 +211,8 @@ final class CartViewModel {
                 let created = try await container.account.withAuth {
                     try await api.createOrder(order)
                 }
-                orderFingerprint = ""
+                // Aniq javob: buyurtma yaratildi (yoki shu kalit bilan avval yaratilgani qaytdi)
+                container.cart.clearOrderKey()
                 container.cart.clear()
                 // Yangi buyurtma darhol "faol buyurtmalar"ga qo'shiladi: bosh sahifadagi belgi va
                 // bildirishnomalar shunga tayanadi
@@ -202,6 +227,14 @@ final class CartViewModel {
                 submitting = false
                 guard let apiError = ApiError.from(error) else { return }
                 submitError = apiError.message
+                // Server buyurtmani aniq rad etdi (4xx): u yaratilmagan, keyingi urinish yangi kalit bilan
+                // ketadi. Internet xatosi, 5xx yoki tushunarsiz javobda natija noma'lum: kalit saqlanadi.
+                // 401/408/429 va "raqam tasdiqlanmagan" buyurtma mazmunini rad etish emas: avvalgi
+                // (javobi yo'qolgan) urinish yaratgan bo'lishi mumkin, shuning uchun kalit ham saqlanadi
+                if let status = apiError.status, (400..<500).contains(status),
+                   ![401, 408, 429].contains(status), apiError.code != Account.codeNotVerified {
+                    container.cart.clearOrderKey()
+                }
                 // Narx yoki taom holati o'zgargan bo'lishi mumkin: summani qayta so'raymiz
                 if !apiError.isNetwork {
                     refreshQuote()

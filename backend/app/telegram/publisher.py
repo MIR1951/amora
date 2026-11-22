@@ -2,13 +2,20 @@
 
 import asyncio
 import logging
+import time
+from collections.abc import Iterable
 from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramMigrateToChat,
+    TelegramNotFound,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -16,8 +23,14 @@ from app.config import Settings
 from app.db import utcnow
 from app.models import Order, OrderStatus
 from app.services.orders import get_order
-from app.telegram.keyboards import order_keyboard
-from app.telegram.texts import cancelled_notice, order_text
+from app.telegram.keyboards import order_keyboard, revoke_sign_in_keyboard
+from app.telegram.texts import (
+    VERIFY_SIGNED_IN,
+    cancelled_notice,
+    chat_migrated_alert,
+    order_text,
+    unsent_alert,
+)
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +39,20 @@ SessionFactory = async_sessionmaker[AsyncSession]
 
 # Telegram javob bermasa 60 emas, 20 soniyada voz kechamiz va qayta urinamiz
 REQUEST_TIMEOUT = 20
+
+# Buyurtma shuncha vaqt guruhga yetib bormasa, egalarga shaxsiy xabar yuboriladi
+UNSENT_ALERT_AFTER = timedelta(minutes=2)
+# ...va muammo davom etsa, shuncha soniyada bir marta takrorlanadi
+UNSENT_ALERT_EVERY = 30 * 60.0
+
+# Guruh superguruhga aylantirilsa, Telegram uning ID'sini almashtiradi: eski ID -> yangi ID.
+# Sozlamadagi ID yangilanguncha (qayta ishga tushirishgacha) shu jadval ishlatiladi
+_migrated_chats: dict[int, int] = {}
+
+
+def current_chat_id(chat_id: int) -> int:
+    """Sozlamadagi guruh ID'si, guruh ko'chgan bo'lsa yangisi."""
+    return _migrated_chats.get(chat_id, chat_id)
 
 
 def make_bot(token: str) -> Bot:
@@ -44,18 +71,35 @@ async def publish_order(
     Buyurtma qatori qulflanadi: API va botning zaxira tekshiruvi bir vaqtda
     ishga tushsa ham xabar ikki marta yuborilmaydi.
     """
+    chat_id = current_chat_id(chat_id)
     async with session_factory() as session:
         order = await get_order(session, order_id, for_update=True)
         if order is None or order.tg_message_id is not None:
             return False
         if order.status_enum != OrderStatus.NEW:
             return False  # guruhga yetib bormasidan mijoz bekor qilgan
-        message = await bot.send_message(
-            chat_id,
-            order_text(order, tz_name),
-            reply_markup=order_keyboard(order),
-            request_timeout=15,
-        )
+        text = order_text(order, tz_name)
+        markup = order_keyboard(order)
+        try:
+            message = await bot.send_message(
+                chat_id, text, reply_markup=markup, request_timeout=15
+            )
+        except TelegramMigrateToChat as error:
+            # Guruh superguruhga aylantirilgan: yangi ID bilan shu zahoti qayta yuboramiz
+            new_chat_id = error.migrate_to_chat_id
+            log.error(
+                "Buyurtmalar guruhining ID'si o'zgargan: %s -> %s. AMORA_ORDERS_CHAT_ID ni yangilang",
+                chat_id,
+                new_chat_id,
+            )
+            _migrated_chats[chat_id] = new_chat_id
+            for old, new in list(_migrated_chats.items()):
+                if new == chat_id:
+                    _migrated_chats[old] = new_chat_id
+            chat_id = new_chat_id
+            message = await bot.send_message(
+                chat_id, text, reply_markup=markup, request_timeout=15
+            )
         order.tg_chat_id = chat_id
         order.tg_message_id = message.message_id
         await session.commit()
@@ -79,6 +123,10 @@ async def refresh_order_message(bot: Bot, order: Order, tz_name: str) -> None:
             raise
 
 
+# Qayta urinish foyda bermaydigan xatolar: boshqa buyurtmalarni to'sib qo'ymasligi kerak
+_PERMANENT_ERRORS = (TelegramBadRequest, TelegramForbiddenError, TelegramNotFound)
+
+
 async def sweep_unsent(
     session_factory: SessionFactory, bot: Bot, chat_id: int, tz_name: str, min_age: float = 15.0
 ) -> int:
@@ -100,15 +148,92 @@ async def sweep_unsent(
         try:
             if await publish_order(session_factory, bot, chat_id, order_id, tz_name):
                 sent += 1
+        except _PERMANENT_ERRORS:
+            # Shu buyurtmaning o'zida muammo (yoki bot guruhga yoza olmaydi): keyingisiga o'tamiz
+            log.exception("Buyurtma #%s guruhga yuborilmadi", order_id)
         except Exception:  # noqa: BLE001
             log.exception("Buyurtma #%s guruhga yuborilmadi", order_id)
             break  # Telegram ishlamayapti: keyingi tekshiruvda yana urinamiz
     return sent
 
 
+async def unsent_orders(session_factory: SessionFactory) -> tuple[int, int | None, int]:
+    """Uzoq vaqt guruhga yetib bormagan buyurtmalar: (soni, eng eskisining raqami, necha daqiqa)."""
+    now = utcnow()
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Order.id, Order.created_at)
+                .where(
+                    Order.status == OrderStatus.NEW.value,
+                    Order.tg_message_id.is_(None),
+                    Order.created_at <= now - UNSENT_ALERT_AFTER,
+                )
+                .order_by(Order.id)
+            )
+        ).all()
+    if not rows:
+        return 0, None, 0
+    oldest_id, created_at = rows[0]
+    return len(rows), oldest_id, int((now - created_at).total_seconds() // 60)
+
+
+async def tell_owners(bot: Bot, owner_ids: Iterable[int], text: str) -> int:
+    """Egalarga shaxsiy xabar. Nechtasiga yetib borganini qaytaradi."""
+    delivered = 0
+    for owner_id in owner_ids:
+        try:
+            await bot.send_message(owner_id, text)
+            delivered += 1
+        except Exception:  # noqa: BLE001
+            log.warning("Egaga (%s) xabar yuborilmadi", owner_id, exc_info=True)
+    return delivered
+
+
+class UnsentWatch:
+    """Guruhga yuborish to'xtab qolganini egalarga aytadi (bot guruhdan chiqarilgan, guruh
+    o'chirilgan, token bekor qilingan). Aks holda mijozlar buyurtma beraveradi, xodimlar esa
+    hech narsa ko'rmaydi va buni faqat server jurnalidan bilish mumkin bo'lar edi."""
+
+    def __init__(self, owner_ids: Iterable[int], chat_id: int):
+        self.owner_ids = sorted(owner_ids)
+        self.chat_id = chat_id
+        self._alerted_at: float | None = None
+        self._told_chat: int | None = None
+
+    async def check(self, session_factory: SessionFactory, bot: Bot) -> bool:
+        """Xabar yuborilgan bo'lsa True."""
+        if not self.owner_ids:
+            return False
+        told = False
+        migrated = current_chat_id(self.chat_id)
+        if migrated != self.chat_id and migrated != self._told_chat:
+            if await tell_owners(bot, self.owner_ids, chat_migrated_alert(migrated)):
+                self._told_chat = migrated
+                told = True
+        count, oldest_id, minutes = await unsent_orders(session_factory)
+        if not count:
+            self._alerted_at = None
+            return told
+        now = time.monotonic()
+        if self._alerted_at is not None and now - self._alerted_at < UNSENT_ALERT_EVERY:
+            return told
+        reason = "Telegram guruhga yuborishni rad etmoqda yoki javob bermayapti"
+        if await tell_owners(bot, self.owner_ids, unsent_alert(count, oldest_id, minutes, reason)):
+            self._alerted_at = now
+            told = True
+        return told
+
+
 async def sweep_forever(
-    session_factory: SessionFactory, bot: Bot, chat_id: int, tz_name: str, interval: float = 20.0
+    session_factory: SessionFactory,
+    bot: Bot,
+    chat_id: int,
+    tz_name: str,
+    interval: float = 20.0,
+    owner_ids: Iterable[int] = (),
 ) -> None:
+    watch = UnsentWatch(owner_ids, chat_id)
     while True:
         try:
             sent = await sweep_unsent(session_factory, bot, chat_id, tz_name)
@@ -118,6 +243,12 @@ async def sweep_forever(
             raise
         except Exception:  # noqa: BLE001
             log.exception("Zaxira tekshiruvida xato")
+        try:
+            await watch.check(session_factory, bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Yetib bormagan buyurtmalarni tekshirishda xato")
         await asyncio.sleep(interval)
 
 
@@ -149,6 +280,11 @@ class TelegramNotifier:
             cancelled_notice(order),
             reply_to_message_id=order.tg_message_id,
             allow_sending_without_reply=True,
+        )
+
+    async def signed_in(self, telegram_user_id: int) -> None:
+        await self.bot.send_message(
+            telegram_user_id, VERIFY_SIGNED_IN, reply_markup=revoke_sign_in_keyboard()
         )
 
     async def close(self) -> None:

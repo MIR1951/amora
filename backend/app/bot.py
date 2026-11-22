@@ -23,8 +23,9 @@ from app.telegram import (
 )
 from app.services.apns import ApnsSender
 from app.services.push import PushSender
+from app.telegram.filters import ResetStaleState
 from app.telegram.publisher import SessionFactory, make_bot, sweep_forever
-from app.telegram.watch import watch_forever
+from app.telegram.watch import touch_heartbeat, watch_forever
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ def build_dispatcher(
     dispatcher["cfg"] = cfg
     dispatcher["session_factory"] = session_factory
     dispatcher["push"] = push or PushSender(None)
+    # Tashlab ketilgan sehrgar (masalan "nomini o'zgartirish") keyingi matnni yutib yubormasin
+    reset = ResetStaleState()
+    dispatcher.message.outer_middleware(reset)
+    dispatcher.callback_query.outer_middleware(reset)
     dispatcher.include_router(orders_router.router)
     # Mijozning raqamini tasdiqlash: hamma uchun ochiq, /start va kontaktni boshqalardan oldin oladi
     dispatcher.include_router(verify_router.router)
@@ -131,7 +136,9 @@ async def main() -> None:
             "AMORA_BOT_TOKEN yozilmagan: bot ishlamayapti. Tokenni @BotFather'dan olib "
             ".env fayliga yozing va `docker compose up -d` ni qayta ishga tushiring."
         )
-        await asyncio.Event().wait()
+        while True:
+            touch_heartbeat()
+            await asyncio.sleep(30)
 
     engine = make_engine(cfg.database_url)
     session_factory = make_session_factory(engine)
@@ -152,7 +159,13 @@ async def main() -> None:
     sweeper = None
     if cfg.orders_chat_id is not None:
         sweeper = asyncio.create_task(
-            sweep_forever(session_factory, bot, cfg.orders_chat_id, cfg.timezone)
+            sweep_forever(
+                session_factory,
+                bot,
+                cfg.orders_chat_id,
+                cfg.timezone,
+                owner_ids=cfg.admin_id_set,
+            )
         )
     else:
         log.warning("AMORA_ORDERS_CHAT_ID yozilmagan: buyurtmalar guruhga yuborilmaydi")
@@ -166,10 +179,15 @@ async def main() -> None:
     try:
         await poll_forever(dispatcher, bot, stop)
     finally:
-        commands_task.cancel()
-        watcher.cancel()
+        background = [commands_task, watcher]
         if sweeper is not None:
-            sweeper.cancel()
+            background.append(sweeper)
+        for task in background:
+            task.cancel()
+        # Fon vazifalari to'xtashini kutamiz: yuborilayotgan eslatma yoki hisobotning "yuborildi"
+        # belgisi qaytarib qo'yiladi, baza ulanishi esa ular tugagandan keyin yopiladi
+        await asyncio.gather(*background, return_exceptions=True)
+        await orders_router.wait_for_pushes()
         await bot.session.close()
         await push.close()
         await engine.dispose()

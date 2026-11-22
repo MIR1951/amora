@@ -2,7 +2,10 @@
 
 import asyncio
 import logging
+import time
+from contextlib import suppress
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from aiogram import Bot
 from aiogram.exceptions import (
@@ -11,15 +14,24 @@ from aiogram.exceptions import (
     TelegramMigrateToChat,
     TelegramNotFound,
 )
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.db import utcnow
-from app.models import ACTIVE_STATUSES, Order, OrderStatus, ShopSettings, Staff, StaffRole
+from app.models import (
+    ACTIVE_STATUSES,
+    Order,
+    OrderStatus,
+    PhoneVerification,
+    ShopSettings,
+    Staff,
+    StaffInvite,
+    StaffRole,
+)
 from app.services.reports import build_report, business_day
 from app.services.shop import SHOP_ID, get_shop
-from app.telegram.publisher import SessionFactory
+from app.telegram.publisher import SessionFactory, current_chat_id
 from app.telegram.texts import delay_alert_text, report_text
 
 log = logging.getLogger(__name__)
@@ -125,7 +137,9 @@ async def check_delays(session_factory: SessionFactory, bot: Bot, now: datetime 
 
 async def report_recipients(session_factory: SessionFactory, cfg: Settings, target: str) -> list[int]:
     if target == "group":
-        return [cfg.orders_chat_id] if cfg.orders_chat_id is not None else []
+        if cfg.orders_chat_id is None:
+            return []
+        return [current_chat_id(cfg.orders_chat_id)]
     async with session_factory() as session:
         admins = await session.scalars(
             select(Staff.telegram_id).where(Staff.role == StaffRole.ADMIN.value)
@@ -218,16 +232,56 @@ async def send_daily_report(
     return bool(delivered)
 
 
+HEARTBEAT_FILE = Path("/tmp/amora-bot-heartbeat")
+# Eskirgan tasdiqlash so'rovlari va taklif havolalari shuncha vaqtda bir marta tozalanadi
+CLEANUP_EVERY = 3600.0
+CLEANUP_OLDER_THAN = timedelta(days=7)
+
+
+def touch_heartbeat() -> None:
+    """Bot tirikligini bildiradi: Docker `healthcheck` shu faylning yoshiga qaraydi."""
+    with suppress(OSError):
+        HEARTBEAT_FILE.touch()
+
+
+async def purge_expired(session_factory: SessionFactory, now: datetime | None = None) -> int:
+    """Muddati ancha oldin o'tgan tasdiqlash so'rovlari va taklif havolalarini o'chiradi."""
+    limit = (now or utcnow()) - CLEANUP_OLDER_THAN
+    async with session_factory() as session:
+        verifications = await session.execute(
+            delete(PhoneVerification).where(PhoneVerification.expires_at < limit)
+        )
+        invites = await session.execute(delete(StaffInvite).where(StaffInvite.expires_at < limit))
+        await session.commit()
+    return (verifications.rowcount or 0) + (invites.rowcount or 0)
+
+
 async def watch_forever(
     session_factory: SessionFactory, bot: Bot, cfg: Settings, interval: float = 30.0
 ) -> None:
+    cleaned_at = 0.0
     while True:
+        touch_heartbeat()
+        # Har biri alohida: eslatmalardagi xato kunlik hisobotni to'sib qo'ymasligi kerak
         try:
             if cfg.orders_chat_id is not None:
                 await check_delays(session_factory, bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("Kechikkan buyurtmalarni tekshirishda xato")
+        try:
             await send_daily_report(session_factory, bot, cfg)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            log.exception("Fondagi tekshiruvda xato")
+            log.exception("Kunlik hisobotni yuborishda xato")
+        if time.monotonic() - cleaned_at >= CLEANUP_EVERY:
+            cleaned_at = time.monotonic()
+            try:
+                await purge_expired(session_factory)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                log.exception("Eskirgan yozuvlarni tozalashda xato")
         await asyncio.sleep(interval)

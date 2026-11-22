@@ -132,7 +132,8 @@ Money is `Int` so'm everywhere. Decoding is lenient (missing/null fields take th
 |---|---|
 | `private(set) var orders: [Order]` | observable; active orders only (menu badge) |
 | `func refresh() async` | never throws |
-| `func changedOrders(before: [Order], latest: [Order]) -> [Order]` | free function |
+| `func reset()` | signed out / account deleted |
+| `var onStatusChange: (@MainActor (Order) -> Void)?` | used by LiveUpdates (missed status changes) |
 
 ## Account (Account.swift) — `container.account`
 
@@ -194,7 +195,7 @@ Screen pattern (Kotlin `container.realtime.events.collect { ... }`):
 | `func askPermissionOnce() async` | Kotlin `AskNotificationPermissionOnce` (OrderScreen with active order) |
 | `func toggle() async` | Kotlin `NotificationSwitch.toggle`: system prompt if never asked, else opens Settings |
 | `func openSettings()` | |
-| `func show(_ change: OrderChange)`, `func showPromo(title: String, text: String)`, `func dismiss(_ orderId: Int)` | used by LiveUpdates |
+| `func show(_ change: OrderChange, skipIfDelivered: Bool = true)`, `func dismiss(_ orderId: Int)` | used by LiveUpdates |
 
 ## LocationFinder (LocationFinder.swift) — `container.location`
 

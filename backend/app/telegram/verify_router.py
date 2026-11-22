@@ -5,8 +5,9 @@ Bu router hamma uchun ochiq (mijozlar admin emas) va boshqa router'lardan oldin 
 
 from aiogram import F, Router
 from aiogram.filters import CommandObject, CommandStart
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
+from app.services import customers as customer_service
 from app.services import verify
 from app.telegram import keyboards as kb
 from app.telegram import texts
@@ -47,3 +48,16 @@ async def on_contact(message: Message, session_factory: SessionFactory):
         await message.answer(texts.VERIFY_BAD_PHONE, reply_markup=ReplyKeyboardRemove())
     else:
         await message.answer(texts.VERIFY_NO_REQUEST, reply_markup=ReplyKeyboardRemove())
+
+
+@router.callback_query(kb.VerifyCb.filter(F.action == "revoke"))
+async def on_revoke(callback: CallbackQuery, session_factory: SessionFactory):
+    """"Bu men emas": shu Telegram hisobiga bog'langan mijozning barcha telefonlari chiqariladi."""
+    async with session_factory() as session:
+        count = await customer_service.sign_out_telegram_account(session, callback.from_user.id)
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(
+            texts.VERIFY_REVOKED if count else texts.VERIFY_NOTHING_TO_REVOKE
+        )

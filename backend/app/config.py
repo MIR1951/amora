@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # Soxta buyurtmalardan himoya
     max_active_orders: int = 2
+    # Bitta mijoz soatiga ko'pi bilan nechta buyurtma bera oladi (bekor qilinganlari ham). 0 = cheklovsiz
+    max_orders_per_hour: int = 8
     register_limit_per_hour: int = 10
     # Bitta IP manzildan soatiga nechta tasdiqlash so'rovi (mobil internetda ko'p odam bitta IP'da)
     verify_limit_per_hour: int = 30
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
     apns_topic: str = "uz.amora.app"
     # Faqat Xcode'dan o'rnatilgan sinov ilovalari uchun true (TestFlight/App Store: false)
     apns_sandbox: bool = False
+
+    # Eski ilovalar uchun raqamni tekshirmasdan ro'yxatdan o'tish (/auth/register). Bunday hisob
+    # buyurtma bera olmaydi. Hozirgi ilovalar buni ishlatmaydi, shuning uchun standart holatda o'chiq
+    allow_legacy_register: bool = False
 
     debug: bool = False
 

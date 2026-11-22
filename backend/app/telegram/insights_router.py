@@ -20,6 +20,7 @@ from app.services.reports import (
     build_report,
     period_bounds,
 )
+from app.services.shop import get_shop
 from app.telegram import keyboards as kb
 from app.telegram import texts
 from app.telegram.admin_router import show
@@ -36,8 +37,12 @@ router = protect(Router(name="insights"))
 async def show_report(event: Message | CallbackQuery, period: str, session_factory, cfg: Settings):
     if period not in PERIODS:
         period = "today"
-    start, end = period_bounds(period, cfg.timezone, datetime.now(ZoneInfo(cfg.timezone)))
     async with session_factory() as session:
+        shop = await get_shop(session)
+        await session.commit()
+        start, end = period_bounds(
+            period, cfg.timezone, datetime.now(ZoneInfo(cfg.timezone)), shop
+        )
         report = await build_report(
             session, PERIODS[period], start, end, cfg.timezone, COMPARE_SHIFT.get(period)
         )

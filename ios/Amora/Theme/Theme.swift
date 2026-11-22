@@ -126,7 +126,8 @@ struct AmoraColors {
         surfaceContainerHigh: Color(argb: 0xFFFFFFFF),
         surfaceContainerHighest: Color(argb: 0xFFF6F2EC),
         scrim: Color(argb: 0xFF000000),
-        hint: Color(argb: 0xFF9C938A),
+        // Oq va och fon ustida o'qilishi uchun (WCAG AA: oqda 5.2:1, fonda 4.7:1; avvalgi 0xFF9C938A 3:1 edi)
+        hint: Color(argb: 0xFF736B63),
         ink: Color(argb: 0xFF17130F),
         onInk: Color(argb: 0xFFFFFFFF),
         onInkMuted: Color(argb: 0xFFBDB3A9),

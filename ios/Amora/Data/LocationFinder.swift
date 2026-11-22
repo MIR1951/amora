@@ -8,7 +8,9 @@
 ///   - `func hasPermission() -> Bool`
 ///   - `func requestPermission() async -> Bool`               // shows the system prompt if not determined yet; true if granted
 ///   - `func isEnabled() async -> Bool`                       // location services switched on (checked off the main thread)
-///   - `func lastKnown() -> CLLocation?`                      // instant, may be stale
+///   - `var isReducedAccuracy: Bool`                          // customer allowed only the approximate location
+///   - `func isApproximate(_ location: CLLocation) -> Bool`   // reduced accuracy or error radius > 100 m
+///   - `func lastKnown(maxAge: TimeInterval = 180) -> CLLocation?`   // instant; nil if older than `maxAge`
 ///   - `func current(timeout: TimeInterval = 15) async -> CLLocation?`   // nil on timeout/failure/no permission
 ///   - `func openSettings()`                                  // app page in Settings
 
@@ -127,10 +129,27 @@ final class LocationFinder {
         }.value
     }
 
-    /// Oxirgi ma'lum joylashuv: darhol qaytadi, lekin eskirgan bo'lishi mumkin.
-    func lastKnown() -> CLLocation? {
-        guard hasPermission() else { return nil }
-        return manager.location
+    /// Mijoz faqat taxminiy joylashuvga ruxsat bergan ("Aniq joylashuv" o'chiq): nuqta bir necha
+    /// kilometrga adashishi mumkin.
+    var isReducedAccuracy: Bool {
+        manager.accuracyAuthorization == .reducedAccuracy
+    }
+
+    /// Bu joylashuvni aniq manzil deb bo'lmaydi: taxminiy ruxsat yoki xatolik doirasi katta.
+    func isApproximate(_ location: CLLocation) -> Bool {
+        isReducedAccuracy
+            || location.horizontalAccuracy < 0
+            || location.horizontalAccuracy > LocationFinder.preciseAccuracyMeters
+    }
+
+    static let preciseAccuracyMeters: CLLocationAccuracy = 100
+
+    /// Oxirgi ma'lum joylashuv: darhol qaytadi. `maxAge` soniyadan eski bo'lsa nil: mijoz shu orada
+    /// boshqa joyga ketgan bo'lishi mumkin, eski nuqta uni chalg'itadi.
+    func lastKnown(maxAge: TimeInterval = 180) -> CLLocation? {
+        guard hasPermission(), let location = manager.location else { return nil }
+        if Date().timeIntervalSince(location.timestamp) > maxAge { return nil }
+        return location
     }
 
     /// Hozirgi joylashuv. Belgilangan vaqt ichida aniqlanmasa nil.

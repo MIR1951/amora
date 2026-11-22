@@ -87,6 +87,7 @@ fun AmoraNavHost(
                 onBack = { nav.goBack() },
                 onOpenOrder = { id -> nav.open(Routes.order(id)) },
                 onOpenCart = { nav.openCartFromOrders() },
+                onOpenProfile = { nav.open(Routes.PROFILE) },
             )
         }
         composable(Routes.PROFILE) {

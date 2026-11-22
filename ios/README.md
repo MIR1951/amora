@@ -8,7 +8,9 @@ shriftlar, "shisha" panellar, ikonkalar) va bir xil server (`backend/`, `/api/v1
 - Yetkazish manzilini xaritada tanlash (MapKit), yetkazish hududini tekshirish
 - Raqamni Telegram bot orqali tasdiqlash
 - Buyurtma berish, holatini jonli kuzatish, bekor qilish, buyurtmalar tarixi, qayta buyurtma
-- Ilova ochiq paytda buyurtma holati haqida bildirishnomalar
+- Buyurtma holati haqida bildirishnomalar: ilova ochiq paytda jonli ulanish orqali, yopiq paytda
+  server yuboradigan push (APNs) orqali
+- Hisobdan chiqish va hisobni o'chirish (profil sahifasida)
 
 Uchinchi tomon kutubxonalari ishlatilmaydi. Eng past versiya: iOS 17. Loyiha fayli (`Amora.xcodeproj`)
 repoda saqlanmaydi: u `project.yml` dan [XcodeGen](https://github.com/yonaskolb/XcodeGen) bilan yaratiladi.
@@ -17,10 +19,13 @@ repoda saqlanmaydi: u `project.yml` dan [XcodeGen](https://github.com/yonaskolb/
 
 ```
 ios/
-  project.yml          XcodeGen loyihasi: Amora (ilova) va AmoraUITests (UI sinovi)
+  project.yml          XcodeGen loyihasi: Amora (ilova), AmoraTests (birlik sinovlari), AmoraUITests (UI sinovi)
   Amora/               ilova kodi (App, Theme, Components, Data, Util, Features/...)
+  AmoraTests/          server kerak bo'lmagan tez sinovlar (SSE, holatlar tartibi, JSON o'qish, qidiruv)
   AmoraUITests/        SmokeTests.swift: buyurtmaning butun yo'lini simulyatorda bosib chiqadi
   ci/                  CI yordamchilari
+    asc.py               TestFlight uchun vaqtinchalik imzo (App Store Connect API)
+    select_xcode.sh      runner'dagi eng yangi Xcode 26.x ni tanlaydi
     control_server.py    UI sinovi sinov serverini shu orqali boshqaradi (kafe xodimi o'rnida)
     init_db.py           SQLite sinov bazasida jadvallarni yaratadi
     pick_simulator.py    sinov uchun iPhone simulyatorini tanlaydi
@@ -32,7 +37,7 @@ ios/
 `.github/workflows/ios.yml` `ios/` papkasida o'zgarish bo'lganda (va qo'lda, "Run workflow" orqali)
 GitHub'ning macOS runner'ida ishlaydi:
 
-1. Runner'dagi eng yangi Xcode 16.x tanlanadi, `xcodegen generate` loyihani yaratadi.
+1. Runner'dagi eng yangi Xcode 26.x tanlanadi (`ios/ci/select_xcode.sh`), `xcodegen generate` loyihani yaratadi.
 2. Ikki xil ilova yig'iladi:
    - **sinov uchun** (Debug): shu ishning ichida ko'tariladigan sinov serveriga qaratilgan
      (`AMORA_API_BASE_URL=http://127.0.0.1:8000`);
@@ -66,7 +71,7 @@ Bu ilova faqat simulyatorda ishlaydi. Haqiqiy iPhone uchun Apple imzosi kerak (p
 
 ## Mac'da ishga tushirish
 
-Kerak: macOS, Xcode 16 (App Store'dan) va [Homebrew](https://brew.sh).
+Kerak: macOS, Xcode 26 yoki yangirog'i (App Store'dan) va [Homebrew](https://brew.sh).
 
 ```bash
 brew install xcodegen
@@ -88,6 +93,19 @@ xcodebuild build -project ios/Amora.xcodeproj -scheme Amora \
 
 `project.yml` o'zgartirilgandan keyin `xcodegen generate` ni qayta ishga tushiring.
 `Amora.xcodeproj` ni qo'lda tahrirlamang: keyingi `xcodegen generate` uni qayta yozadi.
+
+Mahalliy server (shifrlanmagan `http://127.0.0.1`) faqat Debug yig'ishda ishlaydi: Release ilovasidan
+`NSAllowsLocalNetworking` istisnosi olib tashlanadi va `AMORA_API_BASE_URL` muhit o'zgaruvchisi o'qilmaydi.
+
+### Birlik sinovlari
+
+Server kerak emas, bir necha soniyada o'tadi:
+
+```bash
+xcodebuild test -project ios/Amora.xcodeproj -scheme Amora \
+  -destination "platform=iOS Simulator,name=iPhone 16" \
+  -only-testing:AmoraTests CODE_SIGNING_ALLOWED=NO
+```
 
 ### UI sinovini Mac'da ishga tushirish
 
@@ -138,13 +156,15 @@ Mac kerak emas. Faqat qo'lda ishga tushadi: GitHub → Actions → **iOS TestFli
    yangi build raqamini tanlaydi (avval yuklanganlarning eng kattasidan +1, kamida run raqami).
 2. Xcode 26 tanlanadi (App Store 2026 aprelidan iOS 26 SDK talab qiladi), `xcodegen generate`.
 3. `asc.py signing`: runner ichida yangi kalit yaratib, App Store Connect API orqali vaqtinchalik
-   **Apple Distribution** sertifikati va **App Store** profili ("Amora CI <run id>") oladi. Kalit faqat
+   **Apple Distribution** sertifikati va **App Store** profili ("Amora CI <run id> <sertifikat ID>") oladi. Kalit faqat
    vaqtinchalik keychain'da turadi.
 4. `xcodebuild archive` (Release, qo'lda imzo), so'ng tekshiruv: server manzili `https://amora.mirjoy.uz`,
    build raqami to'g'ri, `aps-environment = production`.
 5. `xcodebuild -exportArchive` (`app-store-connect`) → `.ipa`, `xcrun altool --upload-app` bilan yuklash.
 6. Har doim (xato bo'lsa ham) `asc.py cleanup`: vaqtinchalik sertifikat va profil o'chiriladi,
-   keychain va kalit fayli o'chiriladi. Akkauntdagi boshqa sertifikatlarga tegilmaydi. Apple TestFlight va
+   keychain va kalit fayli o'chiriladi. Akkauntdagi boshqa sertifikatlarga tegilmaydi: oldingi uzilib
+   qolgan ishlardan qolgan "Amora CI ..." profillaridan faqat nomida ID si yozilgan (ya'ni shu skript
+   o'zi yaratgan) sertifikat bekor qilinadi, profilga shunchaki biriktirilgan boshqa sertifikat emas. Apple TestFlight va
    App Store ilovalarini o'zi qayta imzolaydi, shuning uchun sertifikatni o'chirish yuklangan build'ga ta'sir qilmaydi.
 
 Yuklangandan keyin Apple build'ni 5–30 daqiqada qayta ishlaydi va u App Store Connect → TestFlight'da

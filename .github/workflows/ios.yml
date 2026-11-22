@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements.lock
 
       - name: Ish papkalari va sinov serveri sozlamalari
         run: |
@@ -151,7 +151,8 @@ jobs:
       - name: Sinov serverini ishga tushirish
         working-directory: backend
         run: |
-          pip install -r requirements.txt aiosqlite
+          pip install --require-hashes -r requirements.lock
+          pip install aiosqlite
           python ../ios/ci/init_db.py
           python ../android/ci/backend_ctl.py prepare
           nohup uvicorn app.main:app_factory --factory --host 127.0.0.1 --port 8000 > "$LOGS/backend.log" 2>&1 &
@@ -280,7 +281,8 @@ jobs:
   publish:
     name: Natijalarni saqlash
     needs: [build]
-    if: always() && needs.build.outputs.built == 'true'
+    # Faqat main shoxidan: PR'dan yig'ilgan (ko'rib chiqilmagan) ilova umumiy shoxga tushmasligi kerak
+    if: always() && needs.build.outputs.built == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

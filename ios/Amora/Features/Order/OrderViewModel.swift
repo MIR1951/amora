@@ -59,22 +59,36 @@ final class OrderViewModel {
     // Jonli ulanish ishlab turganda bu so'rov faqat ehtiyot chorasi
     static let pollIntervalLiveNanos: UInt64 = 30_000_000_000
 
+    // Har bir o'qish o'z raqami bilan ketadi: kechikib kelgan eski javob yangi holatni bosib ketmaydi
+    @ObservationIgnored private var generation = 0
+    // Server bu buyurtmani bermaydi (401: hisobdan chiqilgan, 404: bunday buyurtma yo'q):
+    // qayta-qayta so'rashning foydasi yo'q
+    @ObservationIgnored private var unavailable = false
+
     init(orderId: Int) {
         self.orderId = orderId
     }
 
     /// Buyurtmani serverdan qayta o'qiydi. Xato bo'lsa, avval yuklangan ma'lumot ekranda qoladi.
     func refresh(_ container: AppContainer) async {
+        generation += 1
+        let mine = generation
         do {
             let fresh = try await container.api.order(id: orderId)
+            // Shu orada yangiroq o'qish boshlangan yoki buyurtma bekor qilingan: bu javob eskirgan
+            guard mine == generation else { return }
             self.order = fresh
             self.loading = false
             self.error = nil
+            self.unavailable = false
         } catch {
             // Vazifa bekor qilindi (ekran yopildi): hech narsa o'zgarmaydi
-            guard let apiError = ApiError.from(error) else { return }
+            guard let apiError = ApiError.from(error), mine == generation else { return }
             self.loading = false
             self.error = apiError.message
+            if apiError.status == 401 || apiError.status == 404 {
+                self.unavailable = true
+            }
         }
     }
 
@@ -83,6 +97,9 @@ final class OrderViewModel {
         while !Task.isCancelled {
             await refresh(container)
             if let current = self.order, !current.isActive {
+                break
+            }
+            if unavailable {
                 break
             }
             let wait = container.realtime.connected
@@ -112,7 +129,11 @@ final class OrderViewModel {
             do {
                 let updated = try await container.api.cancelOrder(id: id)
                 self.cancelling = false
+                // Bekor qilishdan oldin boshlangan o'qishning javobi endi eskirgan
+                self.generation += 1
                 self.order = updated
+                self.loading = false
+                self.error = nil
             } catch {
                 self.cancelling = false
                 guard let apiError = ApiError.from(error) else { return }

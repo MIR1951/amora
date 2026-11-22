@@ -14,7 +14,10 @@ yangi "Apple Distribution" sertifikati (kaliti faqat shu runner'da yaratiladi) v
 profili yaratiladi, ilova imzolanib yuklangach ikkalasi ham o'chiriladi (`cleanup`). TestFlight va
 App Store'dagi ilovani Apple o'zi qayta imzolaydi, shuning uchun sertifikatni o'chirish yuklangan
 build'ga ta'sir qilmaydi. Akkauntdagi boshqa sertifikat va profillarga tegilmaydi: faqat nomi
-"Amora CI" bilan boshlanadigan profillar va ularning sertifikatlari.
+"Amora CI" bilan boshlanadigan profillar va shu skript o'zi yaratgan sertifikat o'chiriladi.
+Sertifikat "o'ziniki" ekani profil nomidan bilinadi: skript profilni "Amora CI <run> <sertifikat ID>"
+deb nomlaydi. Bunday profilga shunchaki biriktirilgan boshqa sertifikat (masalan, qo'lda qo'shilgan
+doimiy Apple Distribution sertifikati) hech qachon bekor qilinmaydi.
 
 Faqat standart kutubxona + PyJWT[crypto] (pip install "pyjwt[crypto]").
 """
@@ -262,14 +265,45 @@ def make_csr(common_name: str) -> tuple[rsa.RSAPrivateKey, str]:
     return key, csr.public_bytes(serialization.Encoding.PEM).decode()
 
 
+def profile_name_for(run: str, cert_id: str) -> str:
+    """Profil nomi: "Amora CI <run> <sertifikat ID>". Sertifikat ID si nomning oxirida turadi:
+    keyingi ishlar qolib ketgan profilning qaysi sertifikati shu skriptniki ekanini shundan biladi."""
+    return f"{PROFILE_PREFIX} {run} {cert_id}"
+
+
+def own_certificate_ids(profile_name: str, attached_ids: list[str]) -> list[str]:
+    """Qolib ketgan profilning qaysi sertifikatlarini bekor qilish mumkin.
+
+    Faqat ID si profil nomining oxirida yozilgan VA shu profilga biriktirilgan sertifikat: uni shu
+    skript yaratgan (`profile_name_for`). Profilga shunchaki biriktirilgan boshqa sertifikatga
+    tegilmaydi. Nom eski ko'rinishda ("Amora CI <run>") yoki tushunarsiz bo'lsa, hech narsa qaytmaydi.
+    """
+    prefix = PROFILE_PREFIX + " "
+    if not profile_name.startswith(prefix):
+        return []
+    parts = profile_name[len(prefix) :].split(" ")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return []
+    marker = parts[1]
+    return [cert_id for cert_id in attached_ids if cert_id == marker]
+
+
 def cleanup_leftovers(client: Client) -> None:
-    """Oldingi bekor qilingan ishlardan qolgan "Amora CI" profillari va ularning sertifikatlari."""
+    """Oldingi bekor qilingan ishlardan qolgan "Amora CI" profillari va shu skript yaratgan
+    sertifikatlar. Profil o'chiriladi; sertifikat esa faqat `own_certificate_ids` tanisa."""
     profiles = client.get_all("/profiles", {"filter[profileType]": "IOS_APP_STORE", "include": "certificates"})
     for profile in profiles:
-        if not profile["attributes"]["name"].startswith(PROFILE_PREFIX):
+        name = profile["attributes"]["name"]
+        if not name.startswith(PROFILE_PREFIX + " "):
             continue
         certs = profile.get("relationships", {}).get("certificates", {}).get("data", []) or []
-        _revoke_and_delete(client, profile["id"], [cert["id"] for cert in certs])
+        attached = [cert["id"] for cert in certs]
+        own = own_certificate_ids(name, attached)
+        for cert_id in attached:
+            if cert_id not in own:
+                print(f"[ogohlantirish] sertifikat {cert_id} profil \"{name}\" ga biriktirilgan, lekin uni "
+                      "bu skript yaratgani aniq emas: bekor qilinmadi")
+        _revoke_and_delete(client, profile["id"], own)
 
 
 def _revoke_and_delete(client: Client, profile_id: str | None, cert_ids: list[str]) -> None:
@@ -332,7 +366,7 @@ def cmd_signing(args: argparse.Namespace) -> None:
         pkcs12.serialize_key_and_certificates(b"Amora CI", key, certificate, None, encryption)
     )
 
-    profile_name = f"{PROFILE_PREFIX} {os.environ.get('GITHUB_RUN_ID', int(time.time()))}"
+    profile_name = profile_name_for(str(os.environ.get("GITHUB_RUN_ID") or int(time.time())), cert["id"])
     profile = client.request(
         "POST",
         "/profiles",

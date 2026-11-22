@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 va undan eski: kirish kaliti va profil (amora_session) zaxira nusxaga kirmaydi -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="amora_session.xml" />
+</full-backup-content>

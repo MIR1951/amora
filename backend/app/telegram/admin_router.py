@@ -121,7 +121,11 @@ async def show_main(
 
 
 async def show_menu(
-    event: Message | CallbackQuery, session: AsyncSession, notice=None, role: str | None = None
+    event: Message | CallbackQuery,
+    session: AsyncSession,
+    notice=None,
+    role: str | None = None,
+    page: int = 0,
 ):
     products = await load_products(session)
     full = role != STAFF
@@ -131,7 +135,7 @@ async def show_menu(
             text = "🍽 <b>Menyu</b>\n\nHozircha taom yo'q. Birinchisini qo'shing."
     else:
         text = "🍽 <b>Menyu</b>\n\nTugagan yoki yana paydo bo'lgan taomni tanlang."
-    await show(event, text, kb.menu_keyboard(products, full=full), notice)
+    await show(event, text, kb.menu_keyboard(products, full=full, page=page), notice)
 
 
 async def show_product(
@@ -263,11 +267,16 @@ async def cb_toggle_accepting(
 
 @router.callback_query(AdminCb.filter(F.action == "menu"))
 async def cb_menu(
-    callback: CallbackQuery, state: FSMContext, session_factory: SessionFactory, role: str
+    callback: CallbackQuery,
+    callback_data: AdminCb,
+    state: FSMContext,
+    session_factory: SessionFactory,
+    role: str,
 ):
     await state.clear()
+    page = int(callback_data.value) if callback_data.value.isdecimal() else 0
     async with session_factory() as session:
-        await show_menu(callback, session, role=role)
+        await show_menu(callback, session, role=role, page=page)
 
 
 @router.callback_query(AdminCb.filter(F.action == "prod"))
@@ -340,15 +349,17 @@ async def msg_product_edit(
             await show_menu(message, session)
             return
 
+        # Eski rasm fayli faqat baza saqlangandan keyin o'chiriladi: saqlash yiqilsa, baza
+        # o'chirilgan faylga ishora qilib qolmaydi
+        stale_photo = None
         if field == "photo":
             if message.photo:
-                old_path = product.image_path
+                stale_photo = product.image_path
                 product.image_path, product.image_file_id = await save_photo(
                     bot, message, cfg.media_dir
                 )
-                remove_photo_file(cfg.media_dir, old_path)
             elif text == "-":
-                remove_photo_file(cfg.media_dir, product.image_path)
+                stale_photo = product.image_path
                 product.image_path = product.image_file_id = None
             else:
                 await message.answer("Rasmni fayl emas, oddiy rasm sifatida yuboring.")
@@ -376,6 +387,7 @@ async def msg_product_edit(
             product.description = "" if description == "-" else description
 
         await session.commit()
+        remove_photo_file(cfg.media_dir, stale_photo)
         await state.clear()
         await show_product(message, session, product)
 
@@ -522,6 +534,12 @@ async def finish_add(
     event: Message | CallbackQuery, state: FSMContext, session: AsyncSession, category_id: int | None
 ):
     data = await state.get_data()
+    # Holat darhol tozalanadi: tugma ikki marta bosilsa (yoki ikki so'rov bir vaqtda kelsa),
+    # ikkinchisi bo'sh ma'lumot bilan keladi va taom ikki marta qo'shilmaydi
+    await state.clear()
+    if "name" not in data or "price" not in data:
+        await show_menu(event, session)
+        return
     last_order = await session.scalar(select(func.max(Product.sort_order)))
     product = Product(
         name=data["name"],
@@ -534,7 +552,6 @@ async def finish_add(
     )
     session.add(product)
     await session.commit()
-    await state.clear()
     await show_product(event, session, product, "Taom qo'shildi")
 
 
@@ -764,3 +781,15 @@ async def msg_unknown(
     await state.clear()
     async with session_factory() as session:
         await show_main(message, session, cfg, role)
+
+
+@router.callback_query()
+async def cb_stale(
+    callback: CallbackQuery, state: FSMContext, session_factory: SessionFactory, cfg: Settings, role: str
+):
+    """Eskirgan tugma (bot qayta ishga tushgan yoki sehrgar bekor qilingan): javobsiz qolsa,
+    tugma to'xtovsiz aylanib turadi. Bosh menyuga qaytaramiz."""
+    await state.clear()
+    async with session_factory() as session:
+        await show_main(callback, session, cfg, role, "Bu tugma eskirgan")
+

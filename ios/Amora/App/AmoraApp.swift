@@ -1,13 +1,15 @@
 /// App entry point (port of android AmoraApp.kt + MainActivity.kt).
 ///
 /// - Creates the single `AppContainer` and `Router`, injects both with `.environment(...)`.
-/// - Enlarges `URLCache.shared` (AsyncImage food photos) before anything loads.
+/// - Enlarges `URLCache.shared` (food photos, see `ProductImage`) before anything loads.
 /// - Lifecycle: scene becomes active -> `container.onAppForeground()` (+ refresh notification permission
 ///   state, Android LifecycleResumeEffect); scene goes to background -> `container.onAppBackground()`.
 ///   Like Android onStart/onStop: a short `.inactive` (Control Center, notification shade) changes nothing.
 /// - Notifications: `NotificationDelegate` shows order notifications as banners while the app is open
 ///   and, when one is tapped, opens that order (`NotificationInbox` -> `Router.openOrderFromNotification`).
-///   APNs order pushes are not shown while the app is open (the live connection shows its own).
+///   An APNs order push that arrives while the app is open is not shown by the system: its status is
+///   handed to `LiveUpdates.onPush` (via `OrderPushInbox`), which shows one notification per status no
+///   matter whether the change came by push or over the live connection.
 /// - Push: `AppDelegate` registers for remote notifications and passes the APNs token to `PushTokenInbox`.
 ///
 /// Surface:
@@ -68,7 +70,7 @@ struct AmoraApp: App {
         }
     }
 
-    /// Taom rasmlari uchun kattaroq kesh (AsyncImage URLCache.shared dan foydalanadi).
+    /// Taom rasmlari uchun kattaroq disk keshi (`ImageStore` URLSession.shared orqali yuklaydi).
     private static func configureUrlCache() {
         URLCache.shared = URLCache(
             memoryCapacity: 48 * 1024 * 1024,
@@ -101,6 +103,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // Simulyator yoki imzosiz yig'ish: push yo'q, ilova ochiq paytdagi bildirishnomalar ishlayveradi
+        // (jonli ulanish orqali)
     }
 }
 
@@ -108,33 +111,23 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationDelegate()
 
-    private static let orderIdKey = "order_id"
-
-    /// Bildirishnomadagi buyurtma raqami (OrderNotifier.extraOrderId = "order_id").
-    static func orderId(from userInfo: [AnyHashable: Any]) -> Int? {
-        let raw = userInfo[orderIdKey]
-        var id: Int?
-        if let value = raw as? Int {
-            id = value
-        } else if let value = raw as? NSNumber {
-            id = value.intValue
-        } else if let value = raw as? String {
-            id = Int(value)
-        }
-        guard let id, id > 0 else { return nil }
-        return id
-    }
-
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // Ilova ochiq: buyurtma holatini jonli ulanish o'zi ko'rsatadi (OrderNotifier). Serverdan kelgan
-        // xuddi shu xabar (APNs) ikkinchi marta chiqmasin. Aksiya xabari faqat push orqali keladi.
+        // Ilova ochiq paytda serverdan kelgan buyurtma pushi (APNs): tizim banneri ko'rsatilmaydi, holat
+        // LiveUpdates'ga beriladi. U bildirishnomani o'zi chiqaradi va jonli ulanish orqali kelgan xuddi
+        // shu xabar bilan ikkilantirmaydi (jonli ulanish uzilgan bo'lsa ham mijoz xabarsiz qolmaydi).
+        // Aksiya xabari faqat push orqali keladi: u odatdagidek ko'rsatiladi.
         let content = notification.request.content
         if notification.request.trigger is UNPushNotificationTrigger,
            (content.userInfo["type"] as? String) == "order" {
+            if let change = OrderNotifier.orderChange(from: content.userInfo) {
+                Task { @MainActor in
+                    OrderPushInbox.shared.receive(change)
+                }
+            }
             completionHandler([])
             return
         }
@@ -147,7 +140,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-           let orderId = NotificationDelegate.orderId(from: response.notification.request.content.userInfo) {
+           let orderId = OrderNotifier.orderId(from: response.notification.request.content.userInfo) {
             Task { @MainActor in
                 NotificationInbox.shared.open(orderId: orderId)
             }

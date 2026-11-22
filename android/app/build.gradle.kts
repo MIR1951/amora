@@ -13,6 +13,11 @@ val debugApiBaseUrl = providers.gradleProperty("amora.debugApiBaseUrl").orNull?.
 val appVersionName = providers.gradleProperty("amora.versionName").get()
 val appVersionCode = providers.gradleProperty("amora.versionCode").get().toInt()
 
+// Do'konga chiqariladigan versiya maxfiy kalit bilan imzolanadi. U repoda turmaydi: yo'li va
+// parollari muhit o'zgaruvchilaridan olinadi (AMORA_KEYSTORE, AMORA_KEYSTORE_PASSWORD,
+// AMORA_KEY_ALIAS, AMORA_KEY_PASSWORD). AMORA_KEYSTORE berilmasa, sinov kaliti ishlatiladi.
+val releaseKeystore = providers.environmentVariable("AMORA_KEYSTORE").orNull?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "uz.amora.app"
     compileSdk = 35
@@ -35,6 +40,18 @@ android {
             keyAlias = "amora-test"
             keyPassword = "amora-test"
         }
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                // Kalit berilgan-u, paroli yoki nomi yo'q: tushunarsiz imzo xatosidan oldin aniq aytiladi
+                fun requiredEnv(name: String): String =
+                    providers.environmentVariable(name).orNull?.takeIf { it.isNotEmpty() }
+                        ?: throw GradleException("AMORA_KEYSTORE berilgan, lekin $name yo'q: release'ni imzolab bo'lmaydi")
+                storePassword = requiredEnv("AMORA_KEYSTORE_PASSWORD")
+                keyAlias = requiredEnv("AMORA_KEY_ALIAS")
+                keyPassword = requiredEnv("AMORA_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -43,8 +60,11 @@ android {
             buildConfigField("String", "API_BASE_URL", "\"$debugApiBaseUrl\"")
         }
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("testing")
+            // R8: ishlatilmagan kod va resurslar olib tashlanadi, qolgani qisqartiriladi
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "testing")
         }
     }
 
@@ -71,9 +91,21 @@ android {
         }
     }
 
+    // Release yig'ilganda jiddiy lint xatolari (lintVital) yig'ishni to'xtatadi
     lint {
-        checkReleaseBuilds = false
-        abortOnError = false
+        checkReleaseBuilds = true
+        abortOnError = true
+    }
+}
+
+// Sinov kaliti bilan imzolangan release'ni do'konga chiqarib bo'lmaydi: yig'ishda eslatiladi
+gradle.taskGraph.whenReady {
+    val buildsRelease = allTasks.any { it.project == project && it.name.startsWith("package") && it.name.contains("Release") }
+    if (releaseKeystore == null && buildsRelease) {
+        logger.warn(
+            "WARNING: AMORA_KEYSTORE berilmagan, release SINOV kaliti (keystore/amora-test.jks) bilan " +
+                "imzolanmoqda. Bu yig'ilma do'konga chiqarish uchun yaramaydi.",
+        )
     }
 }
 

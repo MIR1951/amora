@@ -1,6 +1,7 @@
 /// Local order-status notifications (port of android notify/OrderNotifier.kt + permission helpers from
 /// ui/components/Notifications.kt). Shown with UNUserNotificationCenter while the app runs; userInfo carries
-/// `order_id`. Foreground banner presentation and tap handling live in the app delegate (UI kit agent).
+/// `order_id` and `status` (same keys as the server's APNs payload, same identifier `order-<id>` as its
+/// apns-collapse-id). Foreground banner presentation and tap handling live in the app delegate (AmoraApp.swift).
 ///
 /// Surface:
 /// - `struct OrderNotice: Equatable { var title: String; var text: String }`
@@ -9,13 +10,14 @@
 ///   - `init(session: SessionStore)`
 ///   - `static let extraOrderId = "order_id"`
 ///   - `nonisolated static func orderId(from userInfo: [AnyHashable: Any]) -> Int?`
+///   - `nonisolated static func orderChange(from userInfo: [AnyHashable: Any]) -> OrderChange?`   // APNs payload
 ///   - `private(set) var enabled: Bool`                      // last known permission state (call refreshEnabled())
 ///   - `func refreshEnabled() async`
 ///   - `func isEnabled() async -> Bool`
 ///   - `func askPermissionOnce() async`                      // Android AskNotificationPermissionOnce
 ///   - `func toggle() async`                                  // Android rememberNotificationSwitch().toggle
 ///   - `func openSettings()`
-///   - `func show(_ change: OrderChange)`, `func showPromo(title: String, text: String)`, `func dismiss(_ orderId: Int)`
+///   - `func show(_ change: OrderChange, skipIfDelivered: Bool = true)`, `func dismiss(_ orderId: Int)`
 
 import Foundation
 import Observation
@@ -64,9 +66,8 @@ func orderNotice(_ change: OrderChange) -> OrderNotice? {
 @Observable
 final class OrderNotifier {
     static let extraOrderId = "order_id"
+    static let extraStatus = "status"
     static let categoryOrders = "orders"
-    static let categoryPromo = "promo"
-    private static let promoIdentifier = "promo"
 
     /// Oxirgi ma'lum ruxsat holati. `refreshEnabled()` bilan yangilanadi.
     private(set) var enabled = false
@@ -94,6 +95,18 @@ final class OrderNotifier {
         }
         guard let id, id > 0 else { return nil }
         return id
+    }
+
+    /// Serverdan kelgan APNs xabaridagi buyurtma holati (`order_id`, `status`, ixtiyoriy `reject_reason`).
+    nonisolated static func orderChange(from userInfo: [AnyHashable: Any]) -> OrderChange? {
+        guard let id = orderId(from: userInfo),
+              let status = userInfo["status"] as? String, !status.isEmpty else { return nil }
+        return OrderChange(
+            orderId: id,
+            status: status,
+            statusLabel: userInfo["status_label"] as? String ?? "",
+            rejectReason: userInfo["reject_reason"] as? String
+        )
     }
 
     private static func isAllowed(_ status: UNAuthorizationStatus) -> Bool {
@@ -160,7 +173,10 @@ final class OrderNotifier {
         }
     }
 
-    func show(_ change: OrderChange) {
+    /// Holat o'zgarishi haqida bildirishnoma chiqaradi. `skipIfDelivered`: shu buyurtmaning aynan shu
+    /// holati haqidagi bildirishnoma (ilova yopiq paytda kelgan push yoki avval chiqarilgani) hali
+    /// bildirishnomalar markazida turgan bo'lsa, qayta chiqarilmaydi.
+    func show(_ change: OrderChange, skipIfDelivered: Bool = true) {
         guard let notice = orderNotice(change) else { return }
         let content = UNMutableNotificationContent()
         content.title = notice.title
@@ -168,26 +184,25 @@ final class OrderNotifier {
         content.sound = .default
         content.categoryIdentifier = OrderNotifier.categoryOrders
         content.threadIdentifier = "order-\(change.orderId)"
-        content.userInfo = [OrderNotifier.extraOrderId: change.orderId]
+        content.userInfo = [
+            OrderNotifier.extraOrderId: change.orderId,
+            OrderNotifier.extraStatus: change.status,
+        ]
         let identifier = OrderNotifier.identifier(change.orderId)
+        let status = change.status
         Task { [weak self] in
             guard let self, await self.isEnabled() else { return }
+            let center = UNUserNotificationCenter.current()
+            if skipIfDelivered {
+                let delivered = await center.deliveredNotifications()
+                let shown = delivered.contains { notification in
+                    notification.request.identifier == identifier
+                        && (notification.request.content.userInfo[OrderNotifier.extraStatus] as? String) == status
+                }
+                if shown { return }
+            }
             let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-            try? await UNUserNotificationCenter.current().add(request)
-        }
-    }
-
-    /// Kafedan aksiya xabari (ilova ochiq paytda keldi).
-    func showPromo(title: String, text: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = text
-        content.sound = .default
-        content.categoryIdentifier = OrderNotifier.categoryPromo
-        Task { [weak self] in
-            guard let self, await self.isEnabled() else { return }
-            let request = UNNotificationRequest(identifier: OrderNotifier.promoIdentifier, content: content, trigger: nil)
-            try? await UNUserNotificationCenter.current().add(request)
+            try? await center.add(request)
         }
     }
 

@@ -15,6 +15,8 @@ class Notifier(Protocol):
 
     async def order_cancelled(self, order_id: int) -> None: ...
 
+    async def signed_in(self, telegram_user_id: int) -> None: ...
+
 
 class NullNotifier:
     """Hech qayerga yubormaydi, faqat logga yozadi (testlar va bot sozlanmagan holat uchun)."""
@@ -24,6 +26,9 @@ class NullNotifier:
 
     async def order_cancelled(self, order_id: int) -> None:
         log.info("Buyurtma #%s bekor qilindi (xabar yuboruvchi sozlanmagan)", order_id)
+
+    async def signed_in(self, telegram_user_id: int) -> None:
+        return None
 
 
 async def safe_notify(coro) -> None:

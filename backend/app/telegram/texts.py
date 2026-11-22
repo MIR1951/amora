@@ -71,12 +71,30 @@ def telegram_link(user_id: int, label: str) -> str:
     return f'<a href="tg://user?id={int(user_id)}">{escape(label)}</a>'
 
 
+# Telegram xabari 4096 belgidan oshmasligi kerak (HTML teglarisiz hisoblanadi, zaxira bilan)
+ORDER_TEXT_LIMIT = 3900
+
+
+def _shorten(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def order_text(order: Order, tz_name: str) -> str:
+    text = _order_text(order, tz_name, name_limit=100, note_limit=500)
+    if len(text) > ORDER_TEXT_LIMIT:
+        # Juda uzun buyurtma (30 ta taom, uzun nomlar va izoh): nomlar va izohlar qisqartiriladi,
+        # aks holda Telegram xabarni umuman qabul qilmaydi
+        text = _order_text(order, tz_name, name_limit=40, note_limit=200)
+    return text
+
+
+def _order_text(order: Order, tz_name: str, name_limit: int, note_limit: int) -> str:
     status = order.status_enum
     lines = [f"{STATUS_EMOJI[status]} <b>№{order.id} · {STATUS_TITLE[status]}</b>", ""]
 
     for item in order.items:
-        lines.append(f"{item.quantity} × {escape(item.name)} — {format_sum(item.line_total)}")
+        name = escape(_shorten(item.name, name_limit))
+        lines.append(f"{item.quantity} × {name} — {format_sum(item.line_total)}")
     lines.append("")
     lines.append(f"Taomlar: {format_sum(order.items_total)}")
     delivery = format_sum(order.delivery_fee) if order.delivery_fee else "bepul"
@@ -97,12 +115,16 @@ def order_text(order: Order, tz_name: str) -> str:
         # Raqam o'chiq bo'lsa ham kuryer mijozga Telegram'da yoza yoki qo'ng'iroq qila oladi
         phone_line += f" · {telegram_link(order.customer_telegram_id, 'Telegram')}"
     lines.append(phone_line)
-    address = escape(order.address_note) if order.address_note else "xaritada ko'rsatilgan"
+    address = (
+        escape(_shorten(order.address_note, note_limit))
+        if order.address_note
+        else "xaritada ko'rsatilgan"
+    )
     if order.distance_km is not None:
         address += f" (kafedan {order.distance_km:.1f} km)"
     lines.append(f"📍 {address}")
     if order.comment:
-        lines.append(f"💬 {escape(order.comment)}")
+        lines.append(f"💬 {escape(_shorten(order.comment, note_limit))}")
     lines.append("")
 
     for event in order.history:
@@ -655,3 +677,35 @@ def pretty_phone(phone: str) -> str:
 
 def verify_done(phone: str) -> str:
     return f"✅ Raqamingiz tasdiqlandi: {escape(pretty_phone(phone))}\n\nEndi Amora ilovasiga qayting."
+
+
+VERIFY_SIGNED_IN = (
+    "🔐 Amora hisobingizga yangi telefondan kirildi.\n\n"
+    "Bu siz bo'lsangiz, hech narsa qilish shart emas. Siz bo'lmasangiz, pastdagi tugmani "
+    "bosing: hisobingizga kirgan barcha telefonlar chiqarib yuboriladi."
+)
+VERIFY_REVOKE_BUTTON = "🚫 Bu men emas"
+VERIFY_REVOKED = (
+    "Barcha telefonlar hisobingizdan chiqarildi. Ilovaga qayta kirish uchun unda "
+    "«Telegram orqali tasdiqlash» tugmasini bosing."
+)
+VERIFY_NOTHING_TO_REVOKE = "Hisobingizga kirgan telefon topilmadi."
+
+
+def unsent_alert(count: int, oldest_id: int, minutes: int, reason: str) -> str:
+    return (
+        f"⚠️ <b>{count} ta buyurtma guruhga yetib bormayapti</b>\n\n"
+        f"Eng eskisi: №{oldest_id}, {minutes} daqiqadan beri kutmoqda.\n"
+        f"Sabab: {escape(reason)}\n\n"
+        "Bot buyurtmalar guruhida ekanini va unga yozish huquqi borligini tekshiring. "
+        "Mijozlar buyurtma berishda davom etmoqda."
+    )
+
+
+def chat_migrated_alert(new_chat_id: int) -> str:
+    return (
+        "ℹ️ Buyurtmalar guruhi superguruhga aylantirilgan, uning ID raqami o'zgardi.\n\n"
+        f"Yangi ID: <code>{new_chat_id}</code>\n\n"
+        "Bot hozircha yangi guruhga yuboryapti, lekin qayta ishga tushgach eski ID'ga qaytadi. "
+        "Serverdagi .env faylida AMORA_ORDERS_CHAT_ID ni shu raqamga almashtiring."
+    )

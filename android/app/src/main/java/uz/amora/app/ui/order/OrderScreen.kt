@@ -131,6 +131,9 @@ data class OrderUiState(
     val cancelling: Boolean = false,
     // Bir martalik xabar (masalan, bekor qilib bo'lmadi)
     val message: String? = null,
+    // Buyurtmani endi so'rab turishning foydasi yo'q: u topilmadi (404) yoki telefon hisobdan
+    // chiqqan (401). "Qayta urinish" bosilmaguncha serverga murojaat qilinmaydi
+    val halted: Boolean = false,
 )
 
 class OrderViewModel(private val container: AppContainer, private val orderId: Int) : ViewModel() {
@@ -140,29 +143,54 @@ class OrderViewModel(private val container: AppContainer, private val orderId: I
     /** Jonli ulanish ishlab turibdimi: ishlasa, serverdan tez-tez so'rab turish shart emas. */
     val liveConnected: Boolean get() = container.realtime.connected.value
 
+    // Har bir o'qishning tartib raqami va ekranga chiqqan eng yangi javobning raqami:
+    // kechikib kelgan eski javob yangisining ustiga yozilmaydi
+    private var loadSeq = 0
+    private var appliedSeq = 0
+
     init {
         // Shu buyurtma haqida jonli xabar keldi: holat darhol qayta o'qiladi
         viewModelScope.launch {
             container.realtime.events.collect { event ->
                 val mine = event is LiveEvent.OrderChanged && event.orderId == orderId
-                if (mine || event == LiveEvent.Resync) refresh()
+                if ((mine || event == LiveEvent.Resync) && !_state.value.halted) launch { refresh() }
             }
         }
     }
 
     /** Buyurtmani serverdan qayta o'qiydi. Xato bo'lsa, avval yuklangan ma'lumot ekranda qoladi. */
     suspend fun refresh() {
+        val seq = ++loadSeq
         try {
             val order = container.api.order(orderId)
+            if (seq < appliedSeq) return
+            appliedSeq = seq
             _state.update { it.copy(loading = false, refreshing = false, order = order, error = null) }
         } catch (e: ApiException) {
-            _state.update { it.copy(loading = false, refreshing = false, error = e.message) }
+            if (seq < appliedSeq) return
+            appliedSeq = seq
+            if (e.isUnauthorized || e.isNotFound) {
+                // Bu buyurtma endi shu telefonga ko'rinmaydi: eski ma'lumot ham ko'rsatilmaydi
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        order = null,
+                        error = if (e.isUnauthorized) SIGNED_OUT_MESSAGE else e.message,
+                        halted = true,
+                    )
+                }
+            } else {
+                _state.update { it.copy(loading = false, refreshing = false, error = e.message) }
+            }
         }
     }
 
+    /** "Qayta urinish": to'xtatilgan bo'lsa, ekran so'rab turishni qaytadan boshlaydi. */
     fun retry() {
-        _state.update { it.copy(loading = it.order == null, error = null) }
-        viewModelScope.launch { refresh() }
+        val halted = _state.value.halted
+        _state.update { it.copy(loading = it.order == null, error = null, halted = false) }
+        if (!halted) viewModelScope.launch { refresh() }
     }
 
     fun pullToRefresh() {
@@ -176,7 +204,9 @@ class OrderViewModel(private val container: AppContainer, private val orderId: I
         viewModelScope.launch {
             try {
                 val order = container.api.cancelOrder(orderId)
-                _state.update { it.copy(cancelling = false, order = order) }
+                // Shu paytda ketayotgan o'qish eski holatni olib kelishi mumkin: u e'tiborsiz qoldiriladi
+                appliedSeq = ++loadSeq
+                _state.update { it.copy(cancelling = false, refreshing = false, order = order) }
             } catch (e: ApiException) {
                 _state.update { it.copy(cancelling = false, message = e.message) }
                 // Kafe allaqachon qabul qilgan bo'lishi mumkin: holatni yangilaymiz
@@ -199,6 +229,7 @@ class OrderViewModel(private val container: AppContainer, private val orderId: I
 }
 
 const val REPEAT_UNAVAILABLE = "Bu taomlar hozir menyuda yo'q"
+private const val SIGNED_OUT_MESSAGE = "Buyurtmani ko'rish uchun raqamingizni Telegram orqali qayta tasdiqlang"
 
 /**
  * Buyurtmadagi taomlarni savatga soladi (savatdagi eski taomlar o'rniga).
@@ -238,13 +269,15 @@ fun OrderScreen(
     var confirmCancel by rememberSaveable { mutableStateOf(false) }
 
     // Ekran ko'rinib turganda holat yangilanib turadi; buyurtma tugagach so'rovlar to'xtaydi
+    // Buyurtma topilmasa yoki telefon hisobdan chiqqan bo'lsa ham to'xtaydi ("Qayta urinish" gacha)
     val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(lifecycleOwner, orderId) {
+    LaunchedEffect(lifecycleOwner, orderId, state.halted) {
+        if (state.halted) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 vm.refresh()
-                val order = vm.state.value.order
-                if (order != null && !order.isActive) break
+                val current = vm.state.value
+                if (current.halted || (current.order != null && !current.order.isActive)) break
                 delay(if (vm.liveConnected) POLL_INTERVAL_LIVE_MS else POLL_INTERVAL_MS)
             }
         }

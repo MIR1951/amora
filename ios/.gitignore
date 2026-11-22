@@ -1,6 +1,7 @@
 # XcodeGen yaratadi (ios/project.yml dan): saqlanmaydi
 Amora.xcodeproj/
 Amora/Resources/Info.plist
+Amora/Resources/Amora.entitlements
 AmoraUITests/Info.plist
 build/
 DerivedData/

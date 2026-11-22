@@ -7,7 +7,7 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 | `backend/` server (API) | Python, FastAPI, PostgreSQL | tayyor |
 | Telegram bot (buyurtmalar guruhi va admin bo'limi) | Python, aiogram | tayyor |
 | `android/` Android ilova | Kotlin, Jetpack Compose | sinovda |
-| iOS ilova | Swift | Android'dan keyin |
+| `ios/` iOS ilova | Swift, SwiftUI | sinovda (TestFlight) |
 
 ## Server qanday ishlaydi
 
@@ -16,7 +16,8 @@ Amora kafe uchun yetkazib berish xizmati. Mijoz mobil ilovada buyurtma beradi, b
 - **Buyurtma.** Summa har doim serverda bazadagi narxlar bo'yicha hisoblanadi. Ilova yuborgan narxga ishonilmaydi.
 - **Holatlar.** `new` (kafe javobi kutilmoqda) → `accepted` (tayyorlanmoqda) → `delivering` (kuryer yo'lda) → `delivered`. Kafe istalgan bosqichda rad etishi mumkin (`rejected`), mijoz faqat kafe qabul qilguncha bekor qila oladi (`cancelled`).
 - **Yetkazish narxi.** Belgilangan narx, ixtiyoriy "falon summadan bepul" chegarasi va ixtiyoriy masofa chegarasi (kafedan necha km gacha).
-- **Soxta buyurtmalardan himoya.** Bitta mijozda bir vaqtda ko'pi bilan 2 ta tugallanmagan buyurtma, raqamni bloklash, ro'yxatdan o'tishga cheklov.
+- **Soxta buyurtmalardan himoya.** Bitta mijozda bir vaqtda ko'pi bilan 2 ta tugallanmagan buyurtma va soatiga ko'pi bilan 8 ta buyurtma (`AMORA_MAX_ACTIVE_ORDERS`, `AMORA_MAX_ORDERS_PER_HOUR`), raqamni bloklash, ro'yxatdan o'tishga cheklov.
+- **Hisob.** Mijoz ilovadan chiqishi (`POST /auth/logout`: faqat shu telefonning kaliti bekor bo'ladi) va hisobini o'chirishi mumkin (`DELETE /me`: ism, raqam va manzillar o'chiriladi, tugallanmagan buyurtma bo'lsa avval u yakunlanishi kerak).
 
 ## Telegram bot
 
@@ -114,19 +115,60 @@ Baza jadvallari birinchi ishga tushishda o'zi yaratiladi. Sinov uchun namuna men
 docker compose exec api python -m app.seed
 ```
 
+Mavjud menyuni tavsif va rasmlar bilan to'ldirish, kategoriyalarni tartiblash (avval taomlar, oxirida ichimliklar):
+
+```bash
+docker compose exec api python -m app.menu_content --dry-run   # nima o'zgarishini ko'rsatadi
+docker compose exec api python -m app.menu_content             # qo'llaydi
+```
+
+Bu buyruq hech bir taomni qo'shmaydi va o'chirmaydi, nom va narxlarga tegmaydi. Tavsif faqat bo'sh bo'lsa, rasm faqat qo'yilmagan bo'lsa yoziladi, shuning uchun botdan kiritilgan matn va rasmlar o'z joyida qoladi. Rasmlar `backend/menu_assets/` dagi umumiy namunaviy suratlar (manbalari: `SOURCES.md`): kafening o'z taomlari suratga olingach, botdagi "Rasmi" tugmasi orqali almashtiriladi.
+
 Server faqat `127.0.0.1:8000` da ochiladi. Tashqariga chiqarish uchun oldiga proksi (Caddy yoki nginx) qo'yib, HTTPS sertifikat (Let's Encrypt) ulash kerak. Mobil ilova faqat HTTPS manzil bilan ishlaydi.
 
 Server mijozning manzilini proksi yuborgan `X-Forwarded-For` sarlavhasining birinchi yozuvidan oladi: ro'yxatdan o'tish va jonli ulanishlar soni shu manzil bo'yicha cheklanadi. Shuning uchun proksi bu sarlavhani mijoz yuborganiga qo'shib emas, o'zi qaytadan yozishi kerak. Caddy (2.5 va keyingi) buni o'zi qiladi. nginx'da `proxy_set_header X-Forwarded-For $remote_addr;` yozilishi kerak (`$proxy_add_x_forwarded_for` emas): aks holda bitta kompyuter sarlavhani soxtalashtirib, cheklovni chetlab o'tishi mumkin.
 
-Yangilash:
+Yangilash (avval zaxira nusxa olinadi: yangi versiyada baza sxemasi o'zgarishi mumkin):
 
 ```bash
-git pull && docker compose up -d --build
+./scripts/backup.sh && git pull && docker compose up -d --build
+docker compose ps        # api va bot "healthy" bo'lishi kerak
 ```
 
-**Push-bildirishnomalar (Firebase).** Firebase konsolidagi *Project settings → Service accounts → Generate new private key* faylini serverga `~/amora/secrets/firebase.json` qilib qo'ying (bu papka GitHub'ga yuklanmaydi). Bot uni o'zi topadi. Fayl yo'q bo'lsa push o'chiq, qolgan hamma narsa ishlaydi. Tekshirish: `docker compose logs bot | grep -i firebase`. "o'qilmadi" chiqsa, `chmod 644 ~/amora/secrets/firebase.json` qilib, `docker compose up -d` ni qayta ishga tushiring. Ilova tomoni `android/app/google-services.json` dan sozlanadi (u maxfiy emas).
+Bot faqat `api` sog'lom bo'lgandan keyin ishga tushadi (ya'ni baza sxemasi yangilangach). Jurnallar har bir xizmat uchun 100 MB bilan cheklangan. Konteyner umumiy Docker tarmog'iga (masalan, Caddy bilan) ulangan bo'lsa, `.env` ga `AMORA_FORWARDED_ALLOW_IPS=<proksi manzili yoki tarmog'i>` yozing: aks holda shu tarmoqdagi boshqa konteyner `X-Forwarded-For` ni soxtalashtira oladi.
 
-**iPhone push (APNs).** iPhone'ga xabar Firebase'siz, to'g'ridan-to'g'ri Apple'ga yuboriladi. Apple Developer → Keys'da "Apple Push Notifications service" kaliti (`.p8`) yarating va serverga `~/amora/secrets/apns.p8` qilib qo'ying (`chmod 644`). `.env` ga `AMORA_APNS_KEY_ID=<kalitning Key ID si>` va `AMORA_APNS_TEAM_ID=<Team ID>` yozing, so'ng `docker compose up -d`. Tekshirish: `docker compose logs bot | grep -i apns`. Fayl yo'q bo'lsa iPhone'ga push o'chiq, qolgani ishlaydi. TestFlight va App Store ilovalari asosiy APNs serveridan oladi; Xcode'dan o'rnatilgan sinov ilovasi uchun `AMORA_APNS_SANDBOX=true`.
+### Zaxira nusxa
+
+`scripts/backup.sh` bazani (`pg_dump`) va taom rasmlarini `backups/` papkasiga saqlaydi va 14 kundan eski nusxalarni o'chiradi. Har kuni o'zi ishlashi uchun `crontab -e` ga qo'shing:
+
+```
+30 3 * * * cd /root/amora && ./scripts/backup.sh >> /var/log/amora-backup.log 2>&1
+```
+
+Nusxalar shu serverning o'zida turadi, shuning uchun `backups/` papkasini boshqa joyga ham ko'chirib turing (rclone, restic yoki `scp`): disk buzilsa, serverdagi nusxa ham yo'qoladi. `docker compose down -v` buyrug'ini ishlatmang: `-v` baza va rasmlarni o'chiradi.
+
+Tiklash (bot va API to'xtatiladi, baza nusxadagi holatga qaytadi):
+
+```bash
+docker compose stop api bot
+docker compose exec -T db pg_restore -U amora -d amora --clean --if-exists < backups/db-<sana>.dump
+docker compose run --rm -T --no-deps --entrypoint sh api -c "tar -xzf - -C /srv/amora/media" < backups/media-<sana>.tgz
+docker compose up -d
+```
+
+### Kutubxonalarni yangilash
+
+Server va testlar `backend/requirements.lock` dagi aniq versiyalarni o'rnatadi (xeshlari bilan). `requirements.txt` o'zgarsa yoki versiyalarni yangilash kerak bo'lsa, lock faylni qayta yarating:
+
+```bash
+cd backend
+docker run --rm -v "$PWD":/w -w /w python:3.13-slim sh -c \
+  "pip install -q pip-tools && pip-compile -q --upgrade --generate-hashes --strip-extras --no-header -o requirements.lock requirements.txt"
+```
+
+**Push-bildirishnomalar (Firebase).** Firebase konsolidagi *Project settings → Service accounts → Generate new private key* faylini serverga `~/amora/secrets/firebase.json` qilib qo'ying (bu papka GitHub'ga yuklanmaydi). Bot uni o'zi topadi. Fayl yo'q bo'lsa push o'chiq, qolgan hamma narsa ishlaydi. Tekshirish: `docker compose logs bot | grep -i firebase`. "o'qilmadi" chiqsa, faylni konteyner foydalanuvchisiga bering: `sudo chown 1000 ~/amora/secrets/firebase.json && chmod 400 ~/amora/secrets/firebase.json`, so'ng `docker compose up -d` ni qayta ishga tushiring. Ilova tomoni `android/app/google-services.json` dan sozlanadi (u maxfiy emas).
+
+**iPhone push (APNs).** iPhone'ga xabar Firebase'siz, to'g'ridan-to'g'ri Apple'ga yuboriladi. Apple Developer → Keys'da "Apple Push Notifications service" kaliti (`.p8`) yarating va serverga `~/amora/secrets/apns.p8` qilib qo'ying (`sudo chown 1000 ~/amora/secrets/apns.p8 && chmod 400 ~/amora/secrets/apns.p8`: faylni faqat konteyner foydalanuvchisi o'qiydi). `.env` ga `AMORA_APNS_KEY_ID=<kalitning Key ID si>` va `AMORA_APNS_TEAM_ID=<Team ID>` yozing, so'ng `docker compose up -d`. Tekshirish: `docker compose logs bot | grep -i apns`. Fayl yo'q bo'lsa iPhone'ga push o'chiq, qolgani ishlaydi. TestFlight va App Store ilovalari asosiy APNs serveridan oladi; Xcode'dan o'rnatilgan sinov ilovasi uchun `AMORA_APNS_SANDBOX=true`.
 
 ## Kompyuterda ishga tushirish va testlar
 
@@ -135,6 +177,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest                                             # testlar (xotiradagi SQLite)
+ruff check .                                       # kod tekshiruvi (pip install ruff)
 
 export AMORA_DATABASE_URL=postgresql+asyncpg://user:parol@localhost:5432/amora
 alembic upgrade head                               # jadvallarni yaratish
@@ -174,7 +217,7 @@ APK GitHub Actions'da yig'iladi (`.github/workflows/android.yml`): testlar o'tad
 - mijozlar oladigan APK haqiqiy server bilan ochiladi: menyu, savat, xarita, profil. Bu sinov serverga faqat o'qish so'rovlarini yuboradi, buyurtma bermaydi;
 - sinov APK'si shu ishning o'zida ko'tarilgan sinov serveri bilan buyurtmaning butun yo'lini bosib o'tadi: buyurtma berish, kafe qabul qilishi, kuryer yo'lga chiqishi, yetkazilishi, mijoz bekor qilishi, kafe rad etishi, qayta buyurtma berish. Kafe xodimining tugmalari o'rnini `android/ci/backend_ctl.py` bosadi. Haqiqiy kafega hech narsa yuborilmaydi.
 
-Tayyor APK va ekran rasmlari har bir ishga tushirishning "Artifacts" bo'limida va `ci-artifacts` shoxida turadi (shoxda faqat oxirgi yig'ilgan versiya).
+Tayyor APK va ekran rasmlari har bir ishga tushirishning "Artifacts" bo'limida turadi. `ci-artifacts` shoxiga faqat `main` shoxidan yig'ilgan versiya yoziladi (shoxda faqat oxirgi yig'ilgan versiya), PR'dan yig'ilgani u yerga tushmaydi.
 
 Kompyuterda yig'ish uchun Android SDK va JDK 17 kerak:
 
@@ -184,7 +227,16 @@ cd android
 # natija: app/build/outputs/apk/release/app-release.apk
 ```
 
-APK `android/keystore/amora-test.jks` sinov kaliti bilan imzolanadi. Bu kalit repoda ochiq turadi va faqat sinov uchun. Do'konga (Google Play) chiqariladigan versiya alohida, maxfiy kalit bilan imzolanadi.
+**Imzo.** Mijozlarga beriladigan APK maxfiy kalit bilan imzolanishi kerak. `android/keystore/amora-test.jks` sinov kaliti repoda paroli bilan ochiq turadi: u bilan imzolangan ilovani istalgan odam o'zgartirib, haqiqiysining ustidan o'rnata oladi. Maxfiy kalit bir marta yaratiladi va yo'qotilmasligi kerak (yo'qolsa, ilovani yangilab bo'lmaydi):
+
+```bash
+keytool -genkeypair -v -keystore amora-release.jks -alias amora -keyalg RSA -keysize 4096 -validity 10000
+base64 -i amora-release.jks | pbcopy      # Linux'da: base64 -w0 amora-release.jks
+```
+
+GitHub'da *Settings → Secrets and variables → Actions* ga to'rtta sir qo'shing: `AMORA_KEYSTORE_BASE64` (yuqoridagi base64 matn), `AMORA_KEYSTORE_PASSWORD`, `AMORA_KEY_ALIAS` (`amora`), `AMORA_KEY_PASSWORD`. Shundan keyin `main` shoxidan yig'ilgan APK shu kalit bilan imzolanadi. Sirlar qo'yilmaguncha va PR'larda APK sinov kaliti bilan imzolanadi (yig'ishda ogohlantirish chiqadi). Kompyuterda maxfiy kalit bilan yig'ish uchun `AMORA_KEYSTORE` (fayl yo'li), `AMORA_KEYSTORE_PASSWORD`, `AMORA_KEY_ALIAS`, `AMORA_KEY_PASSWORD` muhit o'zgaruvchilarini bering.
+
+Eslatma: kalit almashgach, sinov kaliti bilan o'rnatilgan eski ilova ustidan yangisi o'rnatilmaydi. Uni bir marta o'chirib, qayta o'rnatish kerak (mijoz raqamini qayta tasdiqlaydi, buyurtmalar tarixi saqlanadi).
 
 ## Papkalar
 

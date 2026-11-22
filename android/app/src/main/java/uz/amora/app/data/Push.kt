@@ -49,8 +49,8 @@ class PushTokens(
         val pushToken = session.pushToken ?: return@withLock
         val authToken = session.token ?: return@withLock
         // Qaysi manzil qaysi kalit bilan yuborilgani: yuborish paytida manzil yangilansa,
-        // yangisi ham yuboriladi
-        val sent = "$authToken|$pushToken"
+        // yangisi ham yuboriladi. Kirish kalitining o'zi emas, izi saqlanadi (xotirada ochiq turmasin)
+        val sent = sha256Hex("$authToken|$pushToken")
         if (session.pushTokenSentWith == sent) return@withLock
         try {
             api.updatePushToken(pushToken)

@@ -2,7 +2,6 @@ package uz.amora.app.ui.cart
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +15,7 @@ import uz.amora.app.data.Address
 import uz.amora.app.data.ApiException
 import uz.amora.app.data.LiveEvent
 import uz.amora.app.data.OrderIn
+import uz.amora.app.data.orderFingerprint
 import uz.amora.app.data.Quote
 import uz.amora.app.data.toCartItems
 
@@ -44,19 +44,38 @@ private data class QuoteRequest(
 )
 
 class CartViewModel(private val container: AppContainer) : ViewModel() {
-    private val _state = MutableStateFlow(CartUiState())
+    // Izoh va promokod savat bilan birga telefonda saqlanadi: tizim ilovani yopib qo'ysa ham yo'qolmaydi
+    private val _state = MutableStateFlow(
+        CartUiState(
+            comment = container.cart.comment,
+            promoInput = container.cart.promo ?: "",
+            appliedPromo = container.cart.promo,
+        ),
+    )
     val state: StateFlow<CartUiState> = _state.asStateFlow()
 
     // Qiymati o'zgarsa, summa serverdan qayta so'raladi
     private val refreshTick = MutableStateFlow(0)
-    private val appliedPromo = MutableStateFlow<String?>(null)
-
-    // Bitta buyurtma uchun bitta kalit: internet uzilib qayta yuborilsa, buyurtma ikkilanmaydi.
-    // Savat, manzil yoki izoh o'zgarsa, bu endi boshqa buyurtma: kalit ham yangilanadi.
-    private var clientOrderId = UUID.randomUUID().toString()
-    private var orderFingerprint = ""
+    private val appliedPromo = MutableStateFlow(container.cart.promo)
 
     init {
+        // Avvalgi buyurtma mijoz savatdan chiqib ketgandan keyin yaratilgan: u bosh sahifada
+        // ko'rinib turibdi, savat qayta ochilganda o'sha buyurtmaga o'tib ketilmaydi
+        if (!container.orders.state.value.submitting) container.orders.consumeCreatedOrder()
+        // Buyurtma ilova darajasida yuboriladi (ekran yopilsa ham tugaydi): natijasi shu yerda ko'rsatiladi
+        viewModelScope.launch {
+            container.orders.state.collect { submit ->
+                _state.update {
+                    it.copy(
+                        submitting = submit.submitting,
+                        submitError = submit.error?.message,
+                        createdOrderId = submit.createdOrderId,
+                    )
+                }
+                // Narx yoki taom holati o'zgargan bo'lishi mumkin: summani qayta so'raymiz
+                if (submit.error?.isNetwork == false) refreshQuote()
+            }
+        }
         viewModelScope.launch {
             combine(
                 container.cart.items,
@@ -67,7 +86,18 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
                 QuoteRequest(items, address, promo, tick)
             }.collectLatest { request ->
                 if (request.items.isEmpty()) {
-                    _state.update { it.copy(quote = null, quoteLoading = false, quoteError = null) }
+                    // Savat bo'shadi (buyurtma berildi yoki tozalandi): izoh va promokod ham o'chadi
+                    appliedPromo.value = null
+                    _state.update {
+                        it.copy(
+                            quote = null,
+                            quoteLoading = false,
+                            quoteError = null,
+                            comment = "",
+                            promoInput = "",
+                            appliedPromo = null,
+                        )
+                    }
                     return@collectLatest
                 }
                 _state.update { it.copy(quoteLoading = true) }
@@ -119,25 +149,29 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
     fun applyPromo() {
         val code = _state.value.promoInput.trim()
         if (code.isEmpty()) return
+        container.cart.promo = code
         _state.update { it.copy(appliedPromo = code) }
         appliedPromo.value = code
     }
 
     fun removePromo() {
+        container.cart.promo = null
         _state.update { it.copy(appliedPromo = null, promoInput = "") }
         appliedPromo.value = null
     }
 
     fun setComment(comment: String) {
-        _state.update { it.copy(comment = comment.take(MAX_COMMENT_LENGTH)) }
+        val text = comment.take(MAX_COMMENT_LENGTH)
+        container.cart.comment = text
+        _state.update { it.copy(comment = text) }
     }
 
     fun clearSubmitError() {
-        _state.update { it.copy(submitError = null) }
+        container.orders.clearError()
     }
 
     fun consumeCreatedOrder() {
-        _state.update { it.copy(createdOrderId = null) }
+        container.orders.consumeCreatedOrder()
     }
 
     fun submit() {
@@ -154,11 +188,9 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
         val comment = current.comment.trim()
         // Ishlamagan kod buyurtmaga yuborilmaydi: mijoz sababini ko'rgan, summa usiz hisoblangan
         val promo = current.appliedPromo?.takeIf { quote.promoError == null }
-        val fingerprint = "$items|$address|$comment|${profile.phone}|$promo"
-        if (fingerprint != orderFingerprint) {
-            orderFingerprint = fingerprint
-            clientOrderId = UUID.randomUUID().toString()
-        }
+        // Bitta buyurtma uchun bitta kalit: internet uzilib qayta yuborilsa, buyurtma ikkilanmaydi.
+        // Savat, manzil, izoh yoki promokod o'zgarsa, bu endi boshqa buyurtma: kalit ham yangilanadi.
+        val fingerprint = orderFingerprint(items, address, comment, profile.phone, promo)
         val order = OrderIn(
             items = items.toCartItems(),
             latitude = address.latitude,
@@ -167,36 +199,10 @@ class CartViewModel(private val container: AppContainer) : ViewModel() {
             comment = comment,
             name = profile.name,
             phone = profile.phone,
-            clientOrderId = clientOrderId,
             expectedTotal = quote.total,
             promoCode = promo,
         )
-
-        _state.update { it.copy(submitting = true, submitError = null) }
-        viewModelScope.launch {
-            try {
-                val created = container.account.withAuth { container.api.createOrder(order) }
-                orderFingerprint = ""
-                container.cart.clear()
-                // Yangi buyurtma darhol "faol buyurtmalar"ga qo'shiladi: bosh sahifadagi belgi va
-                // bildirishnomalar shunga tayanadi
-                container.live.orderPlaced()
-                appliedPromo.value = null
-                _state.update {
-                    it.copy(
-                        submitting = false,
-                        comment = "",
-                        promoInput = "",
-                        appliedPromo = null,
-                        createdOrderId = created.id,
-                    )
-                }
-            } catch (e: ApiException) {
-                _state.update { it.copy(submitting = false, submitError = e.message) }
-                // Narx yoki taom holati o'zgargan bo'lishi mumkin: summani qayta so'raymiz
-                if (!e.isNetwork) refreshQuote()
-            }
-        }
+        container.orders.submit(order, fingerprint)
     }
 
     private companion object {

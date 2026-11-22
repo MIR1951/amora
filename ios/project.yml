@@ -42,12 +42,14 @@ targets:
       base:
         PRODUCT_NAME: Amora
         PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app
+        # Pastdagi postBuildScripts skripti yig'ilgan Info.plist'ni o'zgartiradi
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         # Faqat iPhone. XcodeGen ilova uchun standart "1,2" (iPhone+iPad) qo'yadi va u loyiha darajasidagi
         # qiymatni bosib ketadi: iPad bo'lsa Apple faqat portret yo'nalishli ilovani qabul qilmaydi
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        # Server manzili. CI sinov yig'ishida: AMORA_API_BASE_URL=http://127.0.0.1:8000
+        # Server manzili. CI sinov yig'ishida (Debug): AMORA_API_BASE_URL=http://127.0.0.1:8000
         AMORA_API_BASE_URL: https://amora.mirjoy.uz
         SWIFT_EMIT_LOC_STRINGS: NO
       configs:
@@ -56,6 +58,25 @@ targets:
           APS_ENVIRONMENT: development
         Release:
           APS_ENVIRONMENT: production
+    # Mijozlarga chiqadigan (Release) ilovada shifrlanmagan mahalliy tarmoq istisnosi bo'lmaydi.
+    # Info.plist bitta fayldan yaratiladi, shuning uchun kalit yig'ilgan ilovadan olib tashlanadi
+    # (imzolashdan oldin). Olib tashlanmasa, yig'ish xato bilan to'xtaydi.
+    postBuildScripts:
+      - name: Release - mahalliy tarmoq istisnosini olib tashlash
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          set -e
+          if [ "${CONFIGURATION}" = "Debug" ]; then
+            exit 0
+          fi
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$PLIST" 2>/dev/null || true
+          if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST" >/dev/null 2>&1; then
+            echo "error: NSAppTransportSecurity Release ilovasidan olib tashlanmadi"
+            exit 1
+          fi
     entitlements:
       path: Amora/Resources/Amora.entitlements
       properties:
@@ -78,6 +99,8 @@ targets:
         NSLocationWhenInUseUsageDescription: Yetkazish manzilini aniqlash uchun joylashuvingiz kerak
         LSApplicationQueriesSchemes:
           - tg
+        # Mahalliy sinov serveri (http://127.0.0.1:8000) uchun. Faqat Debug yig'ishda qoladi: Release'da
+        # pastdagi postBuildScripts bu kalitni Info.plist'dan olib tashlaydi
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # Android'dagi kabi: ochilishda asosiy qizil rang ustida oq logotip
@@ -92,6 +115,23 @@ targets:
         # Xcode 26 (iOS 26 SDK) bilan yig'ilganda tizim elementlari (alert, klaviatura paneli)
         # o'zgarmasin: ilovaning o'z "shisha" dizayni bor va u sinovdan o'tgan ko'rinishda qoladi
         UIDesignRequiresCompatibility: true
+
+  # Tez ishlaydigan birlik sinovlari (server kerak emas): SSE o'qish, holatlar tartibi, ro'yxatlarni
+  # ehtiyotkor o'qish, qidiruv matnini bir xillashtirish. Ilova ichida ishlaydi (@testable import Amora).
+  AmoraTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AmoraTests
+    dependencies:
+      - target: Amora
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.amora.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
 
   AmoraUITests:
     type: bundle.ui-testing
@@ -115,12 +155,14 @@ schemes:
       targets:
         Amora: all
         AmoraUITests: [test]
+        AmoraTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       gatherCoverageData: false
       targets:
+        - name: AmoraTests
         - name: AmoraUITests
     profile:
       config: Release

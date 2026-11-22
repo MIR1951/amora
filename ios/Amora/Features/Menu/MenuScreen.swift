@@ -52,10 +52,12 @@ func buildMenuSections(_ menu: MenuData) -> [MenuSection] {
 }
 
 func searchMenuProducts(_ menu: MenuData, _ query: String) -> [Product] {
-    let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Ikkala tomon ham bir xil ko'rinishga keltiriladi: "qo’y" yozilsa "Qo'y go'shti" topiladi
+    let needle = normalizeSearchText(query)
+    if needle.isEmpty { return menu.products }
     return menu.products.filter { product in
-        product.name.range(of: needle, options: .caseInsensitive) != nil
-            || product.description.range(of: needle, options: .caseInsensitive) != nil
+        normalizeSearchText(product.name).contains(needle)
+            || normalizeSearchText(product.description).contains(needle)
     }
 }
 
@@ -236,7 +238,8 @@ private struct MenuScreenContent: View {
         .onChange(of: router.path.isEmpty) { _, isEmpty in
             if !isEmpty { selected = nil }
         }
-        // Ekran ko'rinib turganda menyu yangilanadi va faol buyurtmalar tekshirib turiladi
+        // Ekran ko'rinib turganda faol buyurtmalar tekshirib turiladi (ilova ochilgandagi birinchi
+        // o'qishni `AppContainer.onAppForeground` bajaradi)
         .task(id: scenePhase == .active) {
             await poll()
         }
@@ -273,13 +276,16 @@ private struct MenuScreenContent: View {
 
     private func poll() async {
         guard scenePhase == .active else { return }
-        vm.refreshCatalog()
         while !Task.isCancelled {
-            vm.refreshActiveOrders()
             // Jonli ulanish ishlayotgan bo'lsa, o'zgarish haqida server o'zi xabar beradi:
             // bu so'rov faqat ehtiyot chorasi bo'lib qoladi
             let seconds = vm.liveConnected ? activeOrdersLiveRefreshSeconds : activeOrdersRefreshSeconds
-            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            do {
+                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            } catch {
+                return
+            }
+            vm.refreshActiveOrders()
         }
     }
 

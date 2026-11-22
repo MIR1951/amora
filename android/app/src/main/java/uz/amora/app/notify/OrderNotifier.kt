@@ -151,6 +151,11 @@ class OrderNotifier(context: Context) {
         manager.cancel(orderId)
     }
 
+    /** Hisobdan chiqildi: avvalgi hisobning bildirishnomalari ekranda qolmaydi. */
+    fun dismissAll() {
+        manager.cancelAll()
+    }
+
     companion object {
         const val CHANNEL_ORDERS = "orders"
         const val CHANNEL_PROMO = "promo"

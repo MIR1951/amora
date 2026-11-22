@@ -244,6 +244,8 @@ class StatusEventOut(BaseModel):
 
 class OrderOut(BaseModel):
     id: int
+    # Ilova bergan takrorlanmas raqam: javob yo'qolgan bo'lsa, ilova buyurtma yaratilganini shundan biladi
+    client_order_id: str | None = None
     status: str
     status_label: str
     is_active: bool

@@ -202,6 +202,7 @@ struct MenuShopHero: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 154)
+        .dynamicTypeSize(...amoraControlTypeLimit)
         .clipShape(shape)
         .background(shape.fill(colors.ink).softShadow(elevation: 14, alpha: 0.22))
         .accessibilityElement(children: .combine)
@@ -446,6 +447,8 @@ struct MenuPinnedChips: View {
                 .allowsHitTesting(false)
             MenuCategoryChips(titles: titles, selectedIndex: selectedIndex, autoScroll: true, onSelect: onSelect)
                 .frame(height: menuPinnedChipsHeight)
+                // Qator balandligi qat'iy: juda katta shriftda yozuv kesilib qolmasin
+                .dynamicTypeSize(...amoraControlTypeLimit)
                 .padding(.bottom, 14)
                 // Bo'sh joyiga bosilganda bosish ostidagi ro'yxatga o'tib ketmaydi
                 .background(Color.clear.contentShape(Rectangle()).onTapGesture {})

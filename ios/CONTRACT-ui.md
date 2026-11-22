@@ -196,7 +196,6 @@ Screens read: `@Environment(AppContainer.self) private var container`, `@Environ
 | `View.fieldStyle(container: Color? = nil, cornerRadius: CGFloat = 18, border: Bool = true, minHeight: CGFloat = 56)` | for TextField: bodyLarge, padding, surface background, thin border, red caret. Inside a card: `.fieldStyle(container: .clear, border: false)` |
 | `View.fieldBorder(cornerRadius: CGFloat = 18)` | border only |
 | `func fieldPrompt(_ text: String, _ colors: AmoraColors) -> Text` | hint-colored placeholder: `TextField("", text: $x, prompt: fieldPrompt("Ism", colors))` |
-| `enum PhoneVisualTransformation` | `static let maxDigits = 9`, `static func format(_ digits: String) -> String` ("90 123 45 67"), `static func digitsOnly(_ text: String) -> String`, `static func binding(_ digits: Binding<String>) -> Binding<String>` (`TextField("", text: PhoneVisualTransformation.binding($phoneDigits))`) |
 
 ## Notifications (Components/NotificationPermission.swift)
 

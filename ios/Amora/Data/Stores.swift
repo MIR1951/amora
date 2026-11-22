@@ -8,8 +8,11 @@
 /// - `@MainActor @Observable final class SessionStore`
 ///   - `private(set) var profile: Profile?`, `private(set) var address: Address?`, `private(set) var token: String?`
 ///   - `func saveToken(_ token: String?)`, `func saveProfile(_ profile: Profile)`, `func saveAddress(_ address: Address)`
-///   - `func signOut()`  // token removed, profile kept but `verified = false`
-///   - `var notificationsAsked: Bool`, `var pushToken: String?`, `var pushTokenSentWith: String?`
+///   - `func signOut()`  // token removed, profile kept but `verified = false` (server rejected the token)
+///   - `func clearAccount()`  // explicit sign-out: token, profile and pending verification removed
+///   - `func clearAddress()`
+///   - `var notificationsAsked: Bool`, `var pushToken: String?`, `var pushTokenSentWith: String?` (SHA-256 hex)
+///   - `var nameDirty: Bool`, `var pendingVerification: PendingVerification?`
 ///   - `func onTokenChange(_ observer: @escaping @MainActor (String?) -> Void)`
 ///   - `static func resetAll()`  // wipes everything (UI tests)
 /// - `struct CartLine: Codable, Equatable, Hashable, Identifiable { var productId: Int; var quantity: Int; var id: Int }`
@@ -20,6 +23,8 @@
 ///   - `func quantity(_ productId: Int) -> Int`, `func add(_ productId: Int)`, `func remove(_ productId: Int)`
 ///   - `func set(_ productId: Int, quantity: Int)`, `func replace(_ lines: [CartLine])`, `func replace(_ items: [Int: Int])`
 ///   - `func retain(_ productIds: Set<Int>)`, `func clear()`
+///   - `private(set) var pendingOrder: PendingOrder?`, `func orderKey(fingerprint:comment:promo:) -> String`,
+///     `func clearOrderKey()`  // idempotency key of the order being submitted (survives restarts)
 /// - `struct CatalogState: Equatable { var loading = false; var error: String? = nil; var shop: Shop? = nil; var menu: MenuData? = nil }`
 /// - `@MainActor @Observable final class Catalog`
 ///   - `init(api: ApiClient)`
@@ -44,6 +49,26 @@ struct Address: Codable, Equatable, Hashable {
     var note: String
 }
 
+/// Telegram orqali boshlangan, hali tugamagan tasdiqlash. Telefonda saqlanadi: ilova yopilib
+/// ochilsa ham (yoki profil ekranidan chiqilsa ham) natija olinadi.
+struct PendingVerification: Codable, Equatable {
+    var code: String
+    var expiresAt: Date
+    var appUrl: String
+    var botUrl: String
+}
+
+/// Yuborilayotgan buyurtmaning kaliti. `fingerprint`: buyurtma mazmunining (taomlar, manzil, izoh,
+/// promokod) xeshi. Mazmun o'zgarmaguncha kalit ham o'zgarmaydi: server shu kalit bilan kelgan
+/// ikkinchi so'rovga yangi buyurtma ochmaydi, avvalgisini qaytaradi.
+struct PendingOrder: Codable, Equatable {
+    var clientOrderId: String
+    var fingerprint: String
+    // Ilova yopilib ochilsa, izoh va promokod qayta tiklanadi: mazmun (va kalit) o'sha-o'sha qoladi
+    var comment: String = ""
+    var promo: String? = nil
+}
+
 private enum Keys {
     static let installed = "amora.installed"
     static let profile = "amora.session.profile"
@@ -52,6 +77,10 @@ private enum Keys {
     static let pushToken = "amora.session.push_token"
     static let pushSentWith = "amora.session.push_token_sent_with"
     static let cart = "amora.cart.lines"
+    static let pendingOrder = "amora.cart.pending_order"
+    static let nameDirty = "amora.session.name_dirty"
+    static let pendingVerification = "amora.session.pending_verification"
+    static let keychainMigrated = "amora.keychain.this_device_only"
     static let tokenAccount = "token"
 }
 
@@ -86,8 +115,20 @@ final class SessionStore {
             Keychain.write(Keys.tokenAccount, nil)
             defaults.set(true, forKey: Keys.installed)
         }
-        let storedToken = Keychain.read(Keys.tokenAccount)
+        let storedToken = Keychain.read(Keys.tokenAccount).flatMap { $0.isEmpty ? nil : $0 }
         token = storedToken
+        // Eski versiya saqlagan kalit bir marta qayta yoziladi: "faqat shu qurilmada" darajasiga o'tadi
+        // (kalit o'qilmagan bo'lsa, masalan telefon hali qulfdan ochilmagan, belgi qo'yilmaydi: keyingi
+        // ochilishda yana uriniladi; yangi kalit esa baribir yangi darajada yoziladi)
+        if !defaults.bool(forKey: Keys.keychainMigrated), let storedToken {
+            if Keychain.write(Keys.tokenAccount, storedToken) {
+                defaults.set(true, forKey: Keys.keychainMigrated)
+            }
+        }
+        // Eski versiya bu yerga kirish kalitining o'zini yozgan: endi faqat xesh (64 belgili hex) turadi
+        if let sentWith = defaults.string(forKey: Keys.pushSentWith), !isSha256Hex(sentWith) {
+            defaults.removeObject(forKey: Keys.pushSentWith)
+        }
         if var stored = readJSON(Profile.self, Keys.profile),
            !stored.name.trimmingCharacters(in: .whitespaces).isEmpty,
            !stored.phone.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -105,7 +146,10 @@ final class SessionStore {
     }
 
     func saveToken(_ token: String?) {
-        Keychain.write(Keys.tokenAccount, token)
+        if !Keychain.write(Keys.tokenAccount, token), token == nil {
+            // O'chirib bo'lmadi: eski kalit keyingi ochilishda qaytib qolmasligi uchun bo'sh qiymat yoziladi
+            Keychain.write(Keys.tokenAccount, "")
+        }
         let changed = self.token != token
         self.token = token
         if changed {
@@ -121,7 +165,8 @@ final class SessionStore {
         set { UserDefaults.standard.set(newValue, forKey: Keys.notificationsAsked) }
     }
 
-    /// Push xizmati bergan qurilma manzili va u qaysi kirish kaliti bilan serverga yuborilgani.
+    /// Push xizmati bergan qurilma manzili va u qaysi kirish kaliti bilan serverga yuborilgani
+    /// (`pushTokenSentWith`: kalit va manzilning SHA-256 xeshi, kalitning o'zi emas).
     var pushToken: String? {
         get { UserDefaults.standard.string(forKey: Keys.pushToken) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.pushToken) }
@@ -132,6 +177,19 @@ final class SessionStore {
         set { UserDefaults.standard.set(newValue, forKey: Keys.pushSentWith) }
     }
 
+    /// Ism telefonda o'zgartirilgan, lekin serverga hali yetib bormagan: serverdagi (eski) ism uni
+    /// bosib ketmasligi uchun avval qayta yuboriladi (`Account.refresh`).
+    var nameDirty: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.nameDirty) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.nameDirty) }
+    }
+
+    /// Tugallanmagan Telegram tasdiqlashi (`Account` boshqaradi).
+    var pendingVerification: PendingVerification? {
+        get { readJSON(PendingVerification.self, Keys.pendingVerification) }
+        set { writeJSON(newValue, Keys.pendingVerification) }
+    }
+
     func saveProfile(_ profile: Profile) {
         writeJSON(profile, Keys.profile)
         self.profile = profile
@@ -140,10 +198,21 @@ final class SessionStore {
     /// Server kirish kalitini tanimadi: telefon hisobdan chiqdi, raqamni qayta tasdiqlash kerak.
     func signOut() {
         saveToken(nil)
+        nameDirty = false
         if var current = profile {
             current.verified = false
             saveProfile(current)
         }
+    }
+
+    /// Mijoz o'zi hisobdan chiqdi (yoki hisobini o'chirdi): kalit ham, profil ham telefondan o'chadi.
+    func clearAccount() {
+        nameDirty = false
+        pendingVerification = nil
+        pushTokenSentWith = nil
+        writeJSON(Profile?.none, Keys.profile)
+        profile = nil
+        saveToken(nil)
     }
 
     func saveAddress(_ address: Address) {
@@ -151,10 +220,18 @@ final class SessionStore {
         self.address = address
     }
 
+    func clearAddress() {
+        writeJSON(Address?.none, Keys.address)
+        address = nil
+    }
+
     /// Hamma saqlangan ma'lumotni o'chiradi (UI testlari uchun: `--amora-reset` argumenti).
     static func resetAll() {
         let defaults = UserDefaults.standard
-        for key in [Keys.profile, Keys.address, Keys.notificationsAsked, Keys.pushToken, Keys.pushSentWith, Keys.cart] {
+        for key in [
+            Keys.profile, Keys.address, Keys.notificationsAsked, Keys.pushToken, Keys.pushSentWith, Keys.cart,
+            Keys.pendingOrder, Keys.nameDirty, Keys.pendingVerification,
+        ] {
             defaults.removeObject(forKey: key)
         }
         Keychain.write(Keys.tokenAccount, nil)
@@ -181,7 +258,12 @@ final class CartStore {
     /// Qo'shilish tartibida (Kotlin LinkedHashMap kabi).
     private(set) var lines: [CartLine] = []
 
+    /// Yuborilayotgan (natijasi hali aniq bo'lmagan) buyurtmaning kaliti. Ilova yopilsa ham saqlanadi:
+    /// internet uzilib, javob kelmay qolgan buyurtma qayta yuborilganda ikkilanmaydi.
+    @ObservationIgnored private(set) var pendingOrder: PendingOrder?
+
     init() {
+        pendingOrder = readJSON(PendingOrder.self, Keys.pendingOrder)
         let stored = readJSON([CartLine].self, Keys.cart) ?? []
         var seen = Set<Int>()
         var clean: [CartLine] = []
@@ -259,6 +341,29 @@ final class CartStore {
 
     func clear() {
         publish([])
+    }
+
+    /// Shu mazmundagi buyurtma uchun kalit: mazmun (`fingerprint`) o'zgarmagan bo'lsa avvalgisi,
+    /// aks holda yangisi. Kalit serverdan aniq javob kelguncha saqlanadi (`clearOrderKey`).
+    func orderKey(fingerprint: String, comment: String, promo: String?) -> String {
+        if let pending = pendingOrder, pending.fingerprint == fingerprint {
+            return pending.clientOrderId
+        }
+        let next = PendingOrder(
+            clientOrderId: UUID().uuidString,
+            fingerprint: fingerprint,
+            comment: comment,
+            promo: promo
+        )
+        pendingOrder = next
+        writeJSON(next, Keys.pendingOrder)
+        return next.clientOrderId
+    }
+
+    /// Server aniq javob berdi (buyurtma yaratildi yoki rad etildi): kalit endi kerak emas.
+    func clearOrderKey() {
+        pendingOrder = nil
+        writeJSON(PendingOrder?.none, Keys.pendingOrder)
     }
 
     private func publish(_ next: [CartLine]) {

@@ -98,16 +98,16 @@ struct ProductImage: View {
         placeholderTint
             .overlay {
                 if let url {
-                    AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.25))) { phase in
+                    RemoteImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
-                            image
+                            Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()
                                 .transition(.opacity)
                         case .failure:
                             placeholderIcon
-                        default:
+                        case .loading:
                             Color.clear.shimmer(Rectangle())
                         }
                     }

@@ -24,6 +24,9 @@ class LiveUpdates(
     private var visibleOrderId: Int? = null
     private var lingerJob: Job? = null
 
+    // Orqa fonda menyu o'zgargani haqida xabar keldi: ilova ekranga qaytganda qayta o'qiladi
+    private var catalogStale = false
+
     // Har bir buyurtma bo'yicha mijozga oxirgi bildirilgan (yoki ekranda ko'rsatilgan) holat
     private val notified = mutableMapOf<Int, String>()
 
@@ -32,11 +35,11 @@ class LiveUpdates(
             realtime.events.collect { event ->
                 when (event) {
                     LiveEvent.Resync -> {
-                        launch { catalog.refresh() }
+                        refreshCatalog()
                         launch { refreshActiveOrders() }
                     }
 
-                    LiveEvent.MenuChanged, LiveEvent.ShopChanged -> launch { catalog.refresh() }
+                    LiveEvent.MenuChanged, LiveEvent.ShopChanged -> refreshCatalog()
 
                     is LiveEvent.OrderChanged -> {
                         notify(event)
@@ -66,6 +69,20 @@ class LiveUpdates(
         lingerJob?.cancel()
         lingerJob = null
         realtime.start()
+        if (catalogStale) refreshCatalog()
+    }
+
+    /**
+     * Menyu va kafe ma'lumotini qayta o'qiydi. Ilova orqa fonda bo'lsa, hech kim ko'rmayotgan
+     * menyu uchun internet va batareya sarflanmaydi: o'qish ekranga qaytguncha qoldiriladi.
+     */
+    private fun refreshCatalog() {
+        if (!foreground) {
+            catalogStale = true
+            return
+        }
+        catalogStale = false
+        scope.launch { catalog.refresh() }
     }
 
     /**
@@ -112,6 +129,14 @@ class LiveUpdates(
         scope.launch { refreshActiveOrders() }
     }
 
+    /** Hisobdan chiqildi yoki hisob o'chirildi: avvalgi buyurtmalar haqida hech narsa eslab qolinmaydi. */
+    fun forgetOrders() {
+        notified.clear()
+        visibleOrderId = null
+        activeOrders.clear()
+        notifier.dismissAll()
+    }
+
     /**
      * Holat o'zgarishi haqida bildiradi. Bitta o'zgarish ikki yo'ldan kelishi mumkin (jonli xabar
      * va qayta o'qish): ikkinchisi va kechikib kelgan eski holat e'tiborsiz qoldiriladi.
@@ -131,7 +156,7 @@ class LiveUpdates(
     }
 
     private companion object {
-        const val BACKGROUND_LINGER_MS = 20 * 60 * 1000L
+        const val BACKGROUND_LINGER_MS = 2 * 60 * 1000L
     }
 }
 

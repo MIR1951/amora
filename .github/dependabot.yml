@@ -1,0 +1,18 @@
+# Kutubxonalar va CI qadamlari yangilanishini haftada bir marta tekshiradi va PR ochadi
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

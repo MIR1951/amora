@@ -54,6 +54,8 @@ class CheckResult:
     status: CheckStatus
     token: str | None = None
     customer: Customer | None = None
+    # Birinchi marta kirildi (javob qayta so'ralgani emas): Telegram'ga xabar beriladi
+    fresh: bool = False
 
 
 def _aware(value):
@@ -289,7 +291,7 @@ async def complete(session: AsyncSession, code: str) -> CheckResult:
         await session.execute(delete(Customer).where(Customer.id.in_(merged)))
     await session.commit()
     await session.refresh(customer)
-    return CheckResult(CheckStatus.VERIFIED, token=token, customer=customer)
+    return CheckResult(CheckStatus.VERIFIED, token=token, customer=customer, fresh=True)
 
 
 async def _redeem_again(session: AsyncSession, verification: PhoneVerification) -> CheckResult:

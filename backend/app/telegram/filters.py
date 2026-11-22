@@ -28,7 +28,18 @@ STAFF_ACTIONS = frozenset(
     {"main", "menu", "prod", "prod_on", "prod_off", "pause", "resume", "report", "rep"}
 )
 # Xodim yozishi mumkin bo'lgan buyruqlar
-STAFF_COMMANDS = frozenset({"start", "menu", "bekor", "cancel", "help", "yordam", "mijoz"})
+STAFF_COMMANDS = frozenset(
+    {"start", "menu", "bekor", "cancel", "help", "yordam", "mijoz", "client"}
+)
+# Sehrgarni (bir necha qadamli kiritish) boshlaydigan yoki uning ichida bosiladigan tugmalar.
+# Boshqa har qanday tugma bosilsa, yarim qolgan sehrgar bekor bo'ladi
+WIZARD_ACTIONS = frozenset(
+    {
+        "prod_edit", "prod_add", "add_skip_desc", "add_skip_photo", "add_cat",
+        "cat_add", "cat_rename", "set",
+        "ban_edit", "auto_edit", "pc_add", "pc_new", "bc", "bc_send",
+    }
+)
 
 
 async def resolve_role(user_id: int, cfg: Settings, session_factory) -> str | None:
@@ -95,6 +106,44 @@ class StaffLimits(BaseMiddleware):
                 return await handler(event, data)
             await event.answer("Bu amal faqat admin uchun.")
             return None
+        return await handler(event, data)
+
+
+class ResetStaleState(BaseMiddleware):
+    """Yarim qolgan sehrgarni bekor qiladi.
+
+    Admin "✏️ Nomi"ni bosib, "Bekor"ni bosmasdan boshqa bo'limga o'tsa yoki buyruq yozsa, holat
+    saqlanib qolar va keyin yozilgan istalgan matn ("salom") taom nomiga aylanar edi. Sehrgarga
+    tegishli bo'lmagan tugma yoki istalgan buyruq holatni tozalaydi. Filtrlardan oldin ishlaydi.
+    """
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        state = data.get("state")
+        if state is not None and data.get("raw_state") is not None:
+            stale = False
+            if isinstance(event, CallbackQuery):
+                from app.telegram.keyboards import AdminCb
+
+                try:
+                    action = AdminCb.unpack(event.data or "").action
+                except (TypeError, ValueError):
+                    action = None
+                stale = action is not None and action not in WIZARD_ACTIONS
+            elif isinstance(event, Message):
+                stale = _command_name(event.text or event.caption) is not None
+            if stale:
+                # Yangi taom sehrgarida yuklangan, lekin hali hech bir taomga biriktirilmagan rasm
+                staged = (await state.get_data()).get("image_path")
+                cfg = data.get("cfg")
+                if staged and cfg is not None:
+                    (cfg.media_dir / staged).unlink(missing_ok=True)
+                await state.clear()
+                data["raw_state"] = None
         return await handler(event, data)
 
 

@@ -3,6 +3,7 @@ package uz.amora.app.ui.orders
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -81,6 +85,7 @@ import uz.amora.app.ui.components.SectionCard
 import uz.amora.app.ui.components.SkeletonBox
 import uz.amora.app.ui.components.StatusChip
 import uz.amora.app.ui.components.TabChip
+import uz.amora.app.ui.components.expandTouchArea
 import uz.amora.app.ui.components.glassSource
 import uz.amora.app.ui.components.pressScale
 import uz.amora.app.ui.components.rememberGlassState
@@ -101,11 +106,20 @@ data class OrdersUiState(
     val error: String? = null,
     val orders: List<Order> = emptyList(),
     val hasMore: Boolean = false,
+    // Telefon hisobdan chiqqan (server kalitni tanimadi): raqamni qayta tasdiqlash kerak
+    val signedOut: Boolean = false,
+    // Bir martalik xabar: ro'yxat ekranda turganda yuz bergan xato (yangilash yoki davomini yuklash)
+    val message: String? = null,
 )
 
 class OrdersViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(OrdersUiState())
     val state: StateFlow<OrdersUiState> = _state.asStateFlow()
+
+    // Har bir so'rovning tartib raqami va ekranga chiqqan eng yangi javobning raqami:
+    // kechikib kelgan eski javob yangisining ustiga yozilmaydi
+    private var loadSeq = 0
+    private var appliedSeq = 0
 
     init {
         // Buyurtma holati o'zgargani haqida jonli xabar kelsa, ro'yxat o'zi yangilanadi
@@ -118,15 +132,20 @@ class OrdersViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Birinchi sahifani qayta yuklaydi. `byUser`: mijoz ekranni pastga tortdi. */
     fun reload(byUser: Boolean = false) {
+        val seq = ++loadSeq
         if (container.session.token == null) {
-            // Hali birorta buyurtma berilmagan: serverga murojaat qilishning hojati yo'q
-            _state.value = OrdersUiState(loading = false)
+            // Hali birorta buyurtma berilmagan (yoki hisobdan chiqilgan): serverga murojaat
+            // qilishning hojati yo'q
+            appliedSeq = seq
+            _state.value = signedOutState()
             return
         }
         _state.update { it.copy(refreshing = byUser, loading = it.orders.isEmpty() && !byUser, error = null) }
         viewModelScope.launch {
             try {
                 val page = container.api.orders(limit = PAGE_SIZE, offset = 0)
+                if (seq < appliedSeq) return@launch
+                appliedSeq = seq
                 // "Yana ko'rsatish" bilan yuklangan eski buyurtmalar ro'yxatda qoladi:
                 // buyurtmani ochib qaytgan mijoz ro'yxatni yana boshidan varaqlamaydi
                 _state.update { old ->
@@ -134,18 +153,40 @@ class OrdersViewModel(private val container: AppContainer) : ViewModel() {
                     val tail = old.orders.filter { it.id !in freshIds }
                     OrdersUiState(
                         loading = false,
+                        loadingMore = old.loadingMore,
                         orders = page.orders + tail,
                         hasMore = if (tail.isEmpty()) page.hasMore else old.hasMore,
+                        message = old.message,
                     )
                 }
             } catch (e: ApiException) {
+                if (seq < appliedSeq) return@launch
+                appliedSeq = seq
                 if (e.isUnauthorized) {
-                    _state.value = OrdersUiState(loading = false)
+                    _state.value = signedOutState()
                 } else {
-                    _state.update { it.copy(loading = false, refreshing = false, error = e.message) }
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            refreshing = false,
+                            error = e.message,
+                            // Ro'yxat ekranda qoladi: mijoz o'zi yangilagan bo'lsa, natijasini bilishi kerak
+                            message = if (byUser && it.orders.isNotEmpty()) e.message else it.message,
+                        )
+                    }
                 }
             }
         }
+    }
+
+    // Profil bor, lekin kalit yo'q: server bu telefonni hisobdan chiqargan
+    private fun signedOutState() = OrdersUiState(
+        loading = false,
+        signedOut = container.session.token == null && container.session.profile.value != null,
+    )
+
+    fun clearMessage() {
+        _state.update { it.copy(message = null) }
     }
 
     fun loadMore() {
@@ -164,7 +205,11 @@ class OrdersViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
             } catch (e: ApiException) {
-                _state.update { it.copy(loadingMore = false, error = e.message) }
+                if (e.isUnauthorized) {
+                    _state.value = signedOutState()
+                } else {
+                    _state.update { it.copy(loadingMore = false, message = e.message) }
+                }
             }
         }
     }
@@ -179,6 +224,7 @@ fun OrdersScreen(
     onBack: () -> Unit,
     onOpenOrder: (Int) -> Unit,
     onOpenCart: () -> Unit,
+    onOpenProfile: () -> Unit,
 ) {
     val vm: OrdersViewModel = viewModel(
         factory = viewModelFactory { initializer { OrdersViewModel(container) } },
@@ -195,6 +241,14 @@ fun OrdersScreen(
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             vm.reload()
+        }
+    }
+
+    val message = state.message
+    LaunchedEffect(message) {
+        if (message != null) {
+            snackbar.showSnackbar(message)
+            vm.clearMessage()
         }
     }
 
@@ -257,6 +311,15 @@ fun OrdersScreen(
                     text = state.error,
                     actionLabel = "Qayta urinish",
                     onAction = { vm.reload() },
+                    modifier = Modifier.padding(top = top, bottom = navigationBar),
+                )
+
+                state.signedOut -> MessageBox(
+                    icon = R.drawable.ic_user,
+                    title = "Raqam tasdiqlanmagan",
+                    text = "Buyurtmalaringizni ko'rish uchun raqamingizni Telegram orqali qayta tasdiqlang",
+                    actionLabel = "Profilga o'tish",
+                    onAction = onOpenProfile,
                     modifier = Modifier.padding(top = top, bottom = navigationBar),
                 )
 
@@ -440,34 +503,45 @@ private fun OrderCard(
 private fun SmallPill(text: String, icon: Int?, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val source = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .pressScale(source, 0.94f)
-            .clip(RoundedCornerShape(13.dp))
-            .background(scheme.primaryContainer)
-            .clickable(
-                interactionSource = source,
-                indication = androidx.compose.foundation.LocalIndication.current,
-                role = Role.Button,
-                onClick = onClick,
+    Box(modifier = Modifier.pressScale(source, 0.94f)) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(13.dp))
+                .background(scheme.primaryContainer)
+                .indication(source, androidx.compose.foundation.LocalIndication.current)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                // Yozuvni bosiladigan qatlam o'qib beradi
+                .clearAndSetSemantics { },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = null,
+                    tint = scheme.onPrimaryContainer,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onPrimaryContainer,
+                maxLines = 1,
             )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (icon != null) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = null,
-                tint = scheme.onPrimaryContainer,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(6.dp))
         }
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            color = scheme.onPrimaryContainer,
-            maxLines = 1,
+        // Tugma ko'rinishidan balandroq joyda ham bosiladi (kamida 48dp)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .expandTouchArea()
+                .clickable(
+                    interactionSource = source,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .semantics { contentDescription = text },
         )
     }
 }

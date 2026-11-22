@@ -3,6 +3,8 @@ package uz.amora.app.data
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import kotlin.math.roundToLong
+import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -112,6 +114,31 @@ fun parseLiveEvent(message: SseMessage): LiveEvent? = when (message.name) {
     else -> null
 }
 
+// Ketma-ket muvaffaqiyatsiz urinishlardan keyin kutish vaqti
+private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 5_000, 10_000, 20_000, 30_000)
+private const val RETRY_JITTER = 0.3
+
+// Ulanish shuncha vaqt yashagan bo'lsa, u barqaror hisoblanadi
+const val STABLE_CONNECTION_MS = 5_000L
+
+/**
+ * Qayta ulanishdan oldingi kutish vaqti. Server qayta ishga tushganda hamma telefon bir lahzada
+ * qayta ulanmasligi uchun vaqt ±30% ga tasodifiy suriladi. [random]: 0 dan 1 gacha son.
+ */
+fun retryDelayMs(failures: Int, random: Double): Long {
+    val base = RETRY_DELAYS_MS[failures.coerceIn(0, RETRY_DELAYS_MS.lastIndex)]
+    // Yaxlitlab qo'shiladi: kasr sonlar xatosi (0.7 * 1000 = 699.99...) natijani bir millisekundga surmasin
+    return base + (base * RETRY_JITTER * (2 * random.coerceIn(0.0, 1.0) - 1)).roundToLong()
+}
+
+/**
+ * Navbatdagi urinishdan keyingi muvaffaqiyatsizliklar soni. Hisob faqat ulanish bir necha
+ * soniya yashagandan keyin nolga tushadi: ulanib, darhol uzilib turadigan aloqada ilova
+ * serverni har soniyada bezovta qilmaydi. [livedMs]: ulanish qancha yashagani (ulanmagan bo'lsa null).
+ */
+fun nextFailures(failures: Int, livedMs: Long?): Int =
+    if (livedMs != null && livedMs >= STABLE_CONNECTION_MS) 0 else failures + 1
+
 /**
  * Server bilan doimiy ulanish (`GET /api/v1/events`). Ilova ochiq turganda ushlab turiladi:
  * serverda nimadir o'zgarsa, xabar shu ulanish orqali darhol keladi. Aloqa uzilsa, o'zi
@@ -167,15 +194,18 @@ class Realtime(
     private suspend fun runForever() {
         var failures = 0
         while (true) {
-            val wasConnected = connectOnce()
+            val livedMs = connectOnce()
             _connected.value = false
-            failures = if (wasConnected) 0 else failures + 1
-            delay(RETRY_DELAYS_MS[failures.coerceAtMost(RETRY_DELAYS_MS.lastIndex)])
+            failures = nextFailures(failures, livedMs)
+            delay(retryDelayMs(failures, Random.nextDouble()))
         }
     }
 
-    /** Bir marta ulanadi va uzilguncha xabarlarni o'qiydi. Ulanish o'rnatilgan bo'lsa true. */
-    private suspend fun connectOnce(): Boolean = suspendCancellableCoroutine { continuation ->
+    /**
+     * Bir marta ulanadi va uzilguncha xabarlarni o'qiydi. Ulanish o'rnatilgan bo'lsa, u qancha
+     * yashaganini (millisekund) qaytaradi, aks holda null.
+     */
+    private suspend fun connectOnce(): Long? = suspendCancellableCoroutine { continuation ->
         val builder = Request.Builder()
             .url(url)
             .header("Accept", "text/event-stream")
@@ -187,11 +217,11 @@ class Realtime(
         call.enqueue(
             object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isActive) continuation.resume(false)
+                    if (continuation.isActive) continuation.resume(null)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    var ready = false
+                    var readyAt: Long? = null
                     try {
                         response.use {
                             val source = it.body?.source()
@@ -201,7 +231,7 @@ class Realtime(
                                     val line = source.readUtf8Line() ?: break
                                     val message = parser.feed(line) ?: continue
                                     if (message.name == "ready" && continuation.isActive) {
-                                        ready = true
+                                        if (readyAt == null) readyAt = System.nanoTime()
                                         _connected.value = true
                                     }
                                     parseLiveEvent(message)?.let { event -> _events.tryEmit(event) }
@@ -211,14 +241,10 @@ class Realtime(
                     } catch (e: IOException) {
                         // Aloqa uzildi yoki ulanish bekor qilindi: tashqaridagi sikl qayta ulanadi
                     }
-                    if (continuation.isActive) continuation.resume(ready)
+                    val livedMs = readyAt?.let { (System.nanoTime() - it) / 1_000_000 }
+                    if (continuation.isActive) continuation.resume(livedMs)
                 }
             },
         )
-    }
-
-    private companion object {
-        // Ketma-ket muvaffaqiyatsiz urinishlardan keyin kutish vaqti
-        val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 5_000, 10_000, 20_000, 30_000)
     }
 }
