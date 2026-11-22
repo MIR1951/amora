@@ -40,7 +40,7 @@ jobs:
 
       # Kutubxonalar App Store Connect kaliti diskka yozilishidan OLDIN va qulflangan versiyalarda
       # (xeshlari bilan) o'rnatiladi: begona paket kalitni o'qiy olmasligi kerak
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
