@@ -33,7 +33,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       # Ikki xil APK: mijozlar uchun (release, haqiqiy serverga qaratilgan) va emulyator sinovi uchun
       # (debug, shu ishning o'zida ko'tariladigan sinov serveriga qaratilgan).
       # Mijozlarga beriladigan APK maxfiy kalit bilan imzolanadi. Kalit GitHub sirlarida turadi
