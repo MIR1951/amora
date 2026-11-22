@@ -211,7 +211,7 @@ async def test_sweep_skips_fresh_and_cancelled_orders(api, seed, tg, bot, sessio
 async def test_stranger_gets_id_not_menu(driver, seed, session_factory):
     await driver.say("/start", user_id=STRANGER_ID)
     assert str(STRANGER_ID) in driver.screen
-    assert driver.buttons == []
+    assert driver.buttons == ["🙋 Xodim bo'lishni so'rash"]
 
     # Begona odam admin tugmasini bosa olmaydi
     await driver.press_data(

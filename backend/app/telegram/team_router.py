@@ -1,12 +1,19 @@
-"""Adminlar va xodimlar: taklif havolasi orqali qo'shish va olib tashlash."""
+"""Adminlar va xodimlar: qo'shish va olib tashlash.
+
+Qo'shishning uch yo'li bor:
+- admin Telegram'ning "odamni tanlash" oynasidan kontaktni tanlaydi;
+- yangi odam botga /start yozib so'rov yuboradi, egasi yoki admin tasdiqlaydi;
+- bir martalik taklif havolasi.
+"""
 
 import logging
 import secrets
+import time
 from datetime import timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandObject, CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +23,7 @@ from app.models import Staff, StaffInvite, StaffRole
 from app.telegram import keyboards as kb
 from app.telegram import texts
 from app.telegram.admin_router import show
-from app.telegram.filters import ADMIN, OWNER, ROLE_TITLES, protect, resolve_role
+from app.telegram.filters import ADMIN, OWNER, ROLE_TITLES, is_admin, protect, resolve_role
 from app.telegram.keyboards import AdminCb
 from app.telegram.publisher import SessionFactory
 
@@ -24,6 +31,12 @@ log = logging.getLogger(__name__)
 
 INVITE_HOURS = 24
 INVITE_PREFIX = "inv_"
+# Bir odam so'rovni shuncha soniyada bir martadan ko'p yubora olmaydi
+JOIN_REQUEST_COOLDOWN = 10 * 60
+ROLE_BY_PICK_ID = {value: key for key, value in kb.PICK_REQUEST_IDS.items()}
+
+# So'rov yuborganlarning ismi: tasdiqlanganda shu ism bilan yoziladi (restartda unutiladi)
+_join_requests: dict[int, tuple[str, float]] = {}
 
 router = protect(Router(name="team"))
 # Taklif havolasini hali hech kim bo'lmagan odam bosadi, shuning uchun alohida, ochiq router
@@ -35,6 +48,41 @@ def can_manage(actor_role: str, target_role: str) -> bool:
     if actor_role == OWNER:
         return True
     return actor_role == ADMIN and target_role == StaffRole.STAFF.value
+
+
+async def add_member(
+    session: AsyncSession, cfg: Settings, user_id: int, name: str, role: str, added_by: int
+) -> str:
+    """Odamni qo'shadi yoki huquqini oshiradi. Natija: added | updated | same | already_admin | owner.
+
+    Hech qachon huquqni kamaytirmaydi: adminni xodimga tushirish uchun avval olib tashlash kerak.
+    """
+    if user_id in cfg.admin_id_set:
+        return "owner"
+    name = (name or str(user_id))[:100]
+    member = await session.scalar(select(Staff).where(Staff.telegram_id == user_id))
+    if member is None:
+        session.add(Staff(telegram_id=user_id, name=name, role=role, added_by=added_by))
+        return "added"
+    if member.role == role:
+        return "same"
+    if member.role == StaffRole.ADMIN.value and role == StaffRole.STAFF.value:
+        return "already_admin"
+    member.role = role
+    member.name = name
+    return "updated"
+
+
+async def tell_new_member(bot: Bot, user_id: int, role: str) -> None:
+    """Yangi odamga xabar. U botni hali ochmagan bo'lsa, Telegram yuborishga ruxsat bermaydi."""
+    title = ROLE_TITLES[role].lower()
+    try:
+        await bot.send_message(
+            user_id,
+            f"✅ Siz Amora botiga <b>{title}</b> bo'lib qo'shildingiz. Boshqaruv menyusi: /start",
+        )
+    except Exception:  # noqa: BLE001
+        log.info("Yangi a'zoga xabar yuborilmadi (botni hali ochmagan bo'lishi mumkin)")
 
 
 async def load_members(session: AsyncSession) -> list[Staff]:
@@ -60,7 +108,76 @@ async def cb_team(
         await show_team(callback, session, cfg, role)
 
 
+def _target_role(callback_data: AdminCb) -> str | None:
+    target = callback_data.value
+    return target if target in (StaffRole.ADMIN.value, StaffRole.STAFF.value) else None
+
+
 @router.callback_query(AdminCb.filter(F.action == "team_inv"))
+async def cb_team_add(callback: CallbackQuery, callback_data: AdminCb, bot: Bot, role: str):
+    target = _target_role(callback_data)
+    if target is None or not can_manage(role, target):
+        await callback.answer("Admin qo'shishni faqat egasi qila oladi", show_alert=True)
+        return
+    me = await bot.me()
+    await show(callback, texts.add_member_text(target, me.username), kb.add_member_keyboard(target))
+
+
+@router.callback_query(AdminCb.filter(F.action == "team_pick"))
+async def cb_team_pick(callback: CallbackQuery, callback_data: AdminCb, role: str):
+    target = _target_role(callback_data)
+    if target is None or not can_manage(role, target):
+        await callback.answer("Admin qo'shishni faqat egasi qila oladi", show_alert=True)
+        return
+    await callback.message.answer(
+        texts.pick_person_text(target), reply_markup=kb.pick_person_keyboard(target)
+    )
+    await callback.answer()
+
+
+@router.message(F.users_shared)
+async def msg_person_picked(
+    message: Message, bot: Bot, session_factory: SessionFactory, cfg: Settings, role: str
+):
+    shared = message.users_shared
+    target = ROLE_BY_PICK_ID.get(shared.request_id)
+    if target is None or not shared.users:
+        await message.answer("Tushunmadim, qaytadan urinib ko'ring.", reply_markup=ReplyKeyboardRemove())
+        return
+    if not can_manage(role, target):
+        await message.answer(
+            "Admin qo'shishni faqat egasi qila oladi.", reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    person = shared.users[0]
+    if person.user_id == message.from_user.id:
+        await message.answer("O'zingizni qo'sha olmaysiz.", reply_markup=ReplyKeyboardRemove())
+        return
+    name = " ".join(part for part in (person.first_name, person.last_name) if part)
+    name = name or (f"@{person.username}" if person.username else str(person.user_id))
+    async with session_factory() as session:
+        result = await add_member(session, cfg, person.user_id, name, target, message.from_user.id)
+        await session.commit()
+    log.info("%s (%s) %s: %s", name, person.user_id, target, result)
+    await message.answer(
+        texts.member_added_text(name, target, result), reply_markup=ReplyKeyboardRemove()
+    )
+    if result in ("added", "updated"):
+        await tell_new_member(bot, person.user_id, target)
+    async with session_factory() as session:
+        await show_team(message, session, cfg, role)
+
+
+@router.message(F.text == texts.PICK_CANCEL_BUTTON)
+async def msg_pick_cancel(message: Message, session_factory: SessionFactory, cfg: Settings, role: str):
+    await message.answer("Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+    if not is_admin(role):
+        return
+    async with session_factory() as session:
+        await show_team(message, session, cfg, role)
+
+
+@router.callback_query(AdminCb.filter(F.action == "team_link"))
 async def cb_team_invite(
     callback: CallbackQuery,
     callback_data: AdminCb,
@@ -68,8 +185,8 @@ async def cb_team_invite(
     session_factory: SessionFactory,
     role: str,
 ):
-    target = callback_data.value
-    if target not in (StaffRole.ADMIN.value, StaffRole.STAFF.value) or not can_manage(role, target):
+    target = _target_role(callback_data)
+    if target is None or not can_manage(role, target):
         await callback.answer("Admin qo'shishni faqat egasi qila oladi", show_alert=True)
         return
     token = secrets.token_urlsafe(16)[:22]
@@ -90,6 +207,64 @@ async def cb_team_invite(
         texts.invite_text(link, target, INVITE_HOURS),
         kb.invite_keyboard(link, texts.invite_share_text(target)),
     )
+
+
+# ---------- Yangi odamning so'rovini ko'rib chiqish ----------
+
+
+async def requester_name(bot: Bot, user_id: int) -> str:
+    """So'rov yuborgan odamning ismi: xotiradan, bo'lmasa Telegram'dan (bot qayta ishga tushgan bo'lsa)."""
+    cached = _join_requests.get(user_id)
+    if cached:
+        return cached[0]
+    try:
+        chat = await bot.get_chat(user_id)
+        return (chat.full_name or chat.username or f"ID {user_id}")[:100]
+    except Exception:  # noqa: BLE001
+        return f"ID {user_id}"
+
+
+@router.callback_query(AdminCb.filter(F.action == "team_ok"))
+async def cb_join_approve(
+    callback: CallbackQuery,
+    callback_data: AdminCb,
+    bot: Bot,
+    session_factory: SessionFactory,
+    cfg: Settings,
+    role: str,
+):
+    target = _target_role(callback_data)
+    if target is None or not can_manage(role, target):
+        await callback.answer("Admin qilishni faqat egasi qila oladi", show_alert=True)
+        return
+    user_id = callback_data.id
+    name = await requester_name(bot, user_id)
+    async with session_factory() as session:
+        result = await add_member(session, cfg, user_id, name, target, callback.from_user.id)
+        await session.commit()
+    log.info("So'rov tasdiqlandi: %s (%s) %s: %s", name, user_id, target, result)
+    who = texts.escape(callback.from_user.full_name or str(callback.from_user.id))
+    await show(callback, f"{texts.member_added_text(name, target, result)}\n\nTasdiqladi: {who}")
+    if result in ("added", "updated"):
+        _join_requests.pop(user_id, None)
+        await tell_new_member(bot, user_id, target)
+
+
+@router.callback_query(AdminCb.filter(F.action == "team_no"))
+async def cb_join_reject(
+    callback: CallbackQuery, callback_data: AdminCb, bot: Bot, session_factory: SessionFactory, cfg: Settings
+):
+    user_id = callback_data.id
+    if await resolve_role(user_id, cfg, session_factory) is not None:
+        await show(callback, "Bu odam allaqachon qo'shilgan. Olib tashlash: 👥 Xodimlar.")
+        return
+    name = texts.escape(await requester_name(bot, user_id))
+    _join_requests.pop(user_id, None)
+    await show(callback, f"❌ {name} so'rovi rad etildi.")
+    try:
+        await bot.send_message(user_id, "Xodim bo'lish so'rovingiz rad etildi.")
+    except Exception:  # noqa: BLE001
+        log.info("Rad etilgan odamga xabar yuborilmadi")
 
 
 @router.callback_query(AdminCb.filter(F.action == "team_del"))
@@ -202,15 +377,8 @@ async def accept_invite(
             return
         invite.used_by = user.id
         invite.used_at = utcnow()
-        member = await session.scalar(select(Staff).where(Staff.telegram_id == user.id))
         name = (user.full_name or user.username or str(user.id))[:100]
-        if member is None:
-            session.add(
-                Staff(telegram_id=user.id, name=name, role=invite.role, added_by=invite.created_by)
-            )
-        else:
-            member.role = invite.role
-            member.name = name
+        await add_member(session, cfg, user.id, name, invite.role, invite.created_by)
         await session.commit()
         role = invite.role
         inviter = invite.created_by
@@ -224,3 +392,51 @@ async def accept_invite(
         await bot.send_message(inviter, f"✅ {texts.escape(name)} {title} bo'lib qo'shildi.")
     except Exception:  # noqa: BLE001
         log.warning("Taklif qilgan odamga xabar yuborilmadi")
+
+
+# ---------- Yangi odam botga o'zi so'rov yuboradi ----------
+
+
+@invite_router.callback_query(F.data == kb.JOIN_REQUEST_DATA)
+async def cb_join_request(
+    callback: CallbackQuery, bot: Bot, session_factory: SessionFactory, cfg: Settings
+):
+    user = callback.from_user
+    if await resolve_role(user.id, cfg, session_factory) is not None:
+        await callback.answer("Siz allaqachon qo'shilgansiz. /start ni bosing.", show_alert=True)
+        return
+    now = time.monotonic()
+    previous = _join_requests.get(user.id)
+    if previous and now - previous[1] < JOIN_REQUEST_COOLDOWN:
+        await callback.answer("So'rov allaqachon yuborilgan. Javobni kuting.", show_alert=True)
+        return
+    name = (user.full_name or user.username or str(user.id))[:100]
+    _join_requests[user.id] = (name, now)
+
+    async with session_factory() as session:
+        admin_ids = list(
+            await session.scalars(select(Staff.telegram_id).where(Staff.role == StaffRole.ADMIN.value))
+        )
+    text = texts.join_request_text(name, user.username, user.id)
+    delivered = 0
+    for chat_id in sorted(cfg.admin_id_set):
+        delivered += await _send_quietly(bot, chat_id, text, kb.join_review_keyboard(user.id, True))
+    for chat_id in admin_ids:
+        delivered += await _send_quietly(bot, chat_id, text, kb.join_review_keyboard(user.id, False))
+    if not delivered:
+        _join_requests.pop(user.id, None)
+        await callback.answer("So'rovni yuborib bo'lmadi. Keyinroq urinib ko'ring.", show_alert=True)
+        return
+    log.info("%s (%s) xodim bo'lishni so'radi", name, user.id)
+    await callback.answer(
+        "So'rov yuborildi. Tasdiqlansa, sizga shu yerda xabar keladi.", show_alert=True
+    )
+
+
+async def _send_quietly(bot: Bot, chat_id: int, text: str, markup) -> int:
+    try:
+        await bot.send_message(chat_id, text, reply_markup=markup)
+        return 1
+    except Exception:  # noqa: BLE001
+        log.warning("So'rov %s ga yuborilmadi", chat_id)
+        return 0

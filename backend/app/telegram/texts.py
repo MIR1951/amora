@@ -386,6 +386,57 @@ def team_text(owner_ids: list[int], members: list[Staff]) -> str:
     return "\n".join(lines)
 
 
+PICK_PERSON_BUTTON = "👤 Odamni tanlash"
+PICK_CANCEL_BUTTON = "❌ Qo'shishni bekor qilish"
+
+
+def add_member_text(role: str, bot_username: str) -> str:
+    who = "admin" if role == "admin" else "xodim"
+    return (
+        f"➕ <b>Yangi {who} qo'shish</b>\n\n"
+        f"Uchta yo'l bor, qaysi biri qulay bo'lsa:\n\n"
+        f"1️⃣ <b>👤 Kontaktlardan tanlash</b> ni bosing va odamni tanlang. "
+        f"U shu zahoti {who} bo'ladi.\n\n"
+        f"2️⃣ Yoki u odam @{escape(bot_username)} botiga /start yozsin va "
+        f"<b>🙋 Xodim bo'lishni so'rash</b> tugmasini bossin. So'rov sizga keladi, "
+        f"siz tasdiqlaysiz.\n\n"
+        f"3️⃣ Yoki <b>🔗 Taklif havolasi</b> ni yarating va unga yuboring."
+    )
+
+
+def pick_person_text(role: str) -> str:
+    who = "admin" if role == "admin" else "xodim"
+    return (
+        f"Pastdagi <b>{PICK_PERSON_BUTTON}</b> tugmasini bosing va {who} qilmoqchi bo'lgan "
+        f"odamni ro'yxatdan tanlang."
+    )
+
+
+def member_added_text(name: str, role: str, result: str) -> str:
+    who = "admin" if role == "admin" else "xodim"
+    name = escape(name)
+    if result == "same":
+        return f"{name} allaqachon {who}."
+    if result == "already_admin":
+        return f"{name} allaqachon admin. Uni xodimga tushirish uchun avval olib tashlang."
+    if result == "owner":
+        return f"{name} botning egasi, uni qo'shish shart emas."
+    return (
+        f"✅ {name} {who} qilib qo'shildi.\n\n"
+        f"Unga botni ochib /start bosishini ayting: boshqaruv menyusi chiqadi."
+    )
+
+
+def join_request_text(name: str, username: str | None, user_id: int) -> str:
+    handle = f" (@{escape(username)})" if username else ""
+    return (
+        f"🙋 <b>Yangi so'rov</b>\n\n"
+        f"{escape(name)}{handle} botda xodim bo'lishni so'ramoqda.\n"
+        f"Telegram ID: <code>{user_id}</code>\n\n"
+        f"Taniysizmi? Tanisangiz, tasdiqlang."
+    )
+
+
 def invite_text(link: str, role: str, hours: int) -> str:
     who = "admin" if role == "admin" else "xodim"
     # Havola aniq <a> teg bilan beriladi: iOS Telegram oddiy matndagi havolani
