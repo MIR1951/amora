@@ -276,7 +276,6 @@ def customer_keyboard(phone: str, blocked: bool, can_block: bool) -> InlineKeybo
 
 # Telegram "odamni tanlash" tugmasi qaytaradigan request_id: qaysi huquq berilayotgani
 PICK_REQUEST_IDS = {"admin": 1, "staff": 2}
-JOIN_REQUEST_DATA = "join_req"
 
 
 def add_member_keyboard(role: str) -> InlineKeyboardMarkup:
@@ -306,22 +305,6 @@ def pick_person_keyboard(role: str) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True,
     )
-
-
-def join_request_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🙋 Xodim bo'lishni so'rash", callback_data=JOIN_REQUEST_DATA)]
-        ]
-    )
-
-
-def join_review_keyboard(user_id: int, can_make_admin: bool) -> InlineKeyboardMarkup:
-    rows = [[_btn("🙋 Xodim qilish", AdminCb(action="team_ok", id=user_id, value="staff"))]]
-    if can_make_admin:
-        rows.append([_btn("🛡 Admin qilish", AdminCb(action="team_ok", id=user_id, value="admin"))])
-    rows.append([_btn("❌ Rad etish", AdminCb(action="team_no", id=user_id))])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def invite_keyboard(link: str, share_text: str) -> InlineKeyboardMarkup:

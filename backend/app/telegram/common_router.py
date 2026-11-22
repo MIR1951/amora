@@ -6,7 +6,6 @@ from aiogram.types import ChatMemberUpdated, Message
 
 from app.config import Settings
 from app.telegram.filters import HasAccess
-from app.telegram.keyboards import join_request_keyboard
 
 router = Router(name="common")
 
@@ -24,9 +23,7 @@ async def cmd_start_stranger(message: Message):
     await message.answer(
         "Bu bot Amora kafe xodimlari uchun.\n\n"
         f"Sizning Telegram ID raqamingiz: <code>{message.from_user.id}</code>\n"
-        "Kafe xodimi bo'lsangiz, pastdagi tugmani bosing: so'rov bot egasiga boradi. "
-        "U tasdiqlasa, sizga xabar keladi.",
-        reply_markup=join_request_keyboard(),
+        "Admin yoki xodim bo'lish uchun bot egasiga ayting: u sizni botda qo'shadi."
     )
 
 
