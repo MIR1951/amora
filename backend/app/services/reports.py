@@ -65,11 +65,22 @@ class Report:
         return sum(self.by_status[status] for status in ACTIVE_STATUSES)
 
 
-def period_bounds(kind: str, tz_name: str, now: datetime) -> tuple[datetime, datetime]:
-    """Davr boshi va oxiri (mahalliy vaqt bilan)."""
+def period_bounds(
+    kind: str, tz_name: str, now: datetime, shop: ShopSettings | None = None
+) -> tuple[datetime, datetime]:
+    """Davr boshi va oxiri (mahalliy vaqt bilan).
+
+    Kafe yarim tundan o'tib ishlasa (masalan 18:00-02:00), "kun" kalendar kuni emas, ish kuni:
+    ochilishdan keyingi ochilishgacha. Aks holda soat 00:30 dagi "Bugun" faqat yarim soatni
+    ko'rsatar, bitta kecha esa ikki hisobotga bo'linib ketar edi (kunlik hisobot bilan mos kelmasdi).
+    """
     zone = ZoneInfo(tz_name)
     local_now = now.astimezone(zone)
     midnight = datetime.combine(local_now.date(), time.min, tzinfo=zone)
+    if shop is not None and shop.open_time > shop.close_time:
+        midnight = datetime.combine(local_now.date(), shop.open_time, tzinfo=zone)
+        if midnight > local_now:
+            midnight -= timedelta(days=1)
     if kind == "yesterday":
         return midnight - timedelta(days=1), midnight
     if kind == "week":

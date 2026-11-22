@@ -17,6 +17,7 @@ from app.telegram.texts import (
     REJECT_REASONS,
     PICK_CANCEL_BUTTON,
     PICK_PERSON_BUTTON,
+    VERIFY_REVOKE_BUTTON,
     VERIFY_SHARE_BUTTON,
     google_maps_url,
     product_button_label,
@@ -30,6 +31,12 @@ class OrderCb(CallbackData, prefix="o"):
     id: int
     action: str  # accept | go | done | reject | back | reason
     reason: int = 0
+
+
+class VerifyCb(CallbackData, prefix="v"):
+    """Mijozga yuborilgan "hisobingizga kirildi" xabari ostidagi tugma."""
+
+    action: str  # revoke
 
 
 class AdminCb(CallbackData, prefix="a"):
@@ -75,12 +82,20 @@ def order_keyboard(order: Order) -> InlineKeyboardMarkup | None:
 
 def reject_reasons_keyboard(order_id: int) -> InlineKeyboardMarkup:
     """Rad etish sababini tanlash. Tasodifan bosilgan "Rad etish"dan ham himoya qiladi."""
-    rows = [
+    # "Orqaga" birinchi qatorda: bu tugmalar hamma xodimda bir vaqtda almashadi. Kimdir
+    # "Qabul qilish"ni bosmoqchi bo'lib turgan joyga rad etish sababi tushib qolmasligi kerak
+    rows = [[_btn("⬅️ Orqaga", OrderCb(id=order_id, action="back"))]]
+    rows += [
         [_btn(reason, OrderCb(id=order_id, action="reason", reason=index))]
         for index, reason in enumerate(REJECT_REASONS)
     ]
-    rows.append([_btn("⬅️ Orqaga", OrderCb(id=order_id, action="back"))])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def revoke_sign_in_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[_btn(VERIFY_REVOKE_BUTTON, VerifyCb(action="revoke"))]]
+    )
 
 
 # ---------- Admin ----------
@@ -110,10 +125,26 @@ def main_menu_keyboard(shop: ShopSettings, role: str = "owner") -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def menu_keyboard(products: list[Product], full: bool = True) -> InlineKeyboardMarkup:
+# Telegram bitta xabarda 100 tagacha tugmaga ruxsat beradi: menyu sahifalarga bo'linadi
+MENU_PAGE_SIZE = 40
+
+
+def menu_keyboard(
+    products: list[Product], full: bool = True, page: int = 0
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for product in products:
+    pages = max(1, -(-len(products) // MENU_PAGE_SIZE))
+    page = min(max(page, 0), pages - 1)
+    for product in products[page * MENU_PAGE_SIZE : (page + 1) * MENU_PAGE_SIZE]:
         builder.row(_btn(product_button_label(product), AdminCb(action="prod", id=product.id)))
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(_btn("◀️", AdminCb(action="menu", value=str(page - 1))))
+        nav.append(_btn(f"{page + 1} / {pages}", AdminCb(action="menu", value=str(page))))
+        if page < pages - 1:
+            nav.append(_btn("▶️", AdminCb(action="menu", value=str(page + 1))))
+        builder.row(*nav)
     if full:
         builder.row(_btn("➕ Taom qo'shish", AdminCb(action="prod_add")))
     builder.row(BACK_TO_MAIN)

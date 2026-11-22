@@ -26,6 +26,7 @@ def order_out(order: Order) -> OrderOut:
     status = order.status_enum
     return OrderOut(
         id=order.id,
+        client_order_id=order.client_order_id,
         status=status.value,
         status_label=STATUS_LABELS[status],
         is_active=status in ACTIVE_STATUSES,
@@ -79,7 +80,9 @@ async def quote(
         cfg,
         promo_code=data.promo_code,
         apply_auto_promo=data.apply_auto_promo,
-        phone=customer.phone if customer else data.phone,
+        # Token bo'lmasa telefon hisobga olinmaydi: aks holda begona raqam buyurtma berganmi,
+        # shu so'rov orqali bilib olish mumkin edi. Buyurtmada raqam bo'yicha baribir tekshiriladi
+        phone=customer.phone if customer else None,
     )
     await session.commit()
     return QuoteOut(

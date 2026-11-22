@@ -1,9 +1,16 @@
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request, Response
 from sqlalchemy import update
 
-from app.api.deps import CfgDep, CustomerDep, DeviceDep, OptionalDeviceDep, SessionDep
+from app.api.deps import (
+    CfgDep,
+    CustomerDep,
+    DeviceDep,
+    NotifierDep,
+    OptionalDeviceDep,
+    SessionDep,
+)
 from app.errors import ApiError
 from app.models import Customer, CustomerDevice
 from app.schemas import (
@@ -16,7 +23,9 @@ from app.schemas import (
     TelegramStartIn,
     TelegramStartOut,
 )
+from app.notifier import safe_notify
 from app.security import hash_token, new_token
+from app.services import customers as customer_service
 from app.services import verify
 from app.services.orders import is_phone_blocked
 
@@ -36,7 +45,13 @@ def _client_ip(request: Request) -> str:
 )
 async def register(data: RegisterIn, request: Request, session: SessionDep, cfg: CfgDep) -> RegisterOut:
     """Eski ilovalar uchun: ism va telefon bilan, raqamni tekshirmasdan. Bunday mijoz buyurtma
-    bera olmaydi, avval `/auth/telegram` orqali raqamini tasdiqlashi kerak."""
+    bera olmaydi, avval `/auth/telegram` orqali raqamini tasdiqlashi kerak.
+
+    Standart holatda o'chiq (`AMORA_ALLOW_LEGACY_REGISTER`): hozirgi ilovalar buni ishlatmaydi."""
+    if not cfg.allow_legacy_register:
+        raise ApiError(
+            410, "update_required", "Ilovaning bu versiyasi eskirgan. Iltimos, ilovani yangilang"
+        )
     if not request.app.state.register_limiter.allow(_client_ip(request)):
         raise ApiError(429, "too_many_requests", "Juda ko'p urinish. Birozdan keyin qayta urinib ko'ring")
 
@@ -110,7 +125,9 @@ async def telegram_start(
     response_model=TelegramCheckOut,
     summary="Raqam tasdiqlandimi",
 )
-async def telegram_check(data: TelegramCheckIn, session: SessionDep) -> TelegramCheckOut:
+async def telegram_check(
+    data: TelegramCheckIn, session: SessionDep, background: BackgroundTasks, notifier: NotifierDep
+) -> TelegramCheckOut:
     """`pending`: mijoz hali botda raqamini yubormadi, bir-ikki soniyadan keyin yana so'rang.
     `verified`: `token` endi shu telefonning kirish kaliti, `customer` mijozning ma'lumotlari.
     Kod eskirgan yoki ishlatib bo'lingan bo'lsa 410."""
@@ -119,6 +136,10 @@ async def telegram_check(data: TelegramCheckIn, session: SessionDep) -> Telegram
         raise ApiError(410, "verification_expired", "Tasdiqlash muddati o'tdi. Qaytadan urinib ko'ring")
     if result.status == verify.CheckStatus.PENDING:
         return TelegramCheckOut(status="pending")
+    if result.fresh and result.customer.telegram_user_id is not None:
+        # Havolani begona odam yuborgan bo'lsa, hisob egasi bilib qoladi va botdagi tugma bilan
+        # barcha telefonlarni hisobdan chiqara oladi
+        background.add_task(safe_notify, notifier.signed_in(result.customer.telegram_user_id))
     return TelegramCheckOut(
         status="verified",
         token=result.token,
@@ -159,3 +180,25 @@ async def update_me(data: CustomerUpdate, device: DeviceDep, session: SessionDep
         device.fcm_token = token
     await session.commit()
     return customer
+
+
+@router.post("/auth/logout", status_code=204, summary="Hisobdan chiqish")
+async def logout(device: DeviceDep, session: SessionDep) -> Response:
+    """Shu telefonning kirish kaliti bekor qilinadi va unga push-xabar yuborilmaydi.
+    Mijozning boshqa telefonlari va buyurtmalari joyida qoladi."""
+    await customer_service.sign_out_device(session, device.id)
+    return Response(status_code=204)
+
+
+@router.delete("/me", status_code=204, summary="Hisobni o'chirish")
+async def delete_me(device: DeviceDep, session: SessionDep) -> Response:
+    """Hisob butunlay o'chiriladi: barcha telefonlar chiqariladi, ism, Telegram hisobi, manzillar
+    va izohlar o'chadi. Tugallanmagan buyurtma bo'lsa 409 `has_active_orders`."""
+    if not await customer_service.delete_account(session, device.customer_id):
+        raise ApiError(
+            409,
+            "has_active_orders",
+            "Tugallanmagan buyurtmangiz bor. U yetkazilgach yoki bekor qilingach, hisobni "
+            "o'chirishingiz mumkin",
+        )
+    return Response(status_code=204)

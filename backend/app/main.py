@@ -69,6 +69,10 @@ def create_app(
         version="0.1.0",
         description="Amora kafe yetkazib berish xizmati uchun mobil ilova API'si.",
         lifespan=lifespan,
+        # Interaktiv hujjat faqat sinov rejimida ochiq (AMORA_DEBUG=true)
+        docs_url="/docs" if cfg.debug else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if cfg.debug else None,
     )
     app.state.settings = cfg
     app.state.engine = db_engine

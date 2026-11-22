@@ -6,13 +6,21 @@ from datetime import time
 MAX_AMOUNT = 100_000_000
 
 _AMOUNT_NOISE = re.compile(r"(so['’`ʻ]?m|sum|uzs|[\s.,_'’`ʻ])", re.IGNORECASE)
+_UNIT = re.compile(r"(so['’`ʻ]?m|sum|uzs)", re.IGNORECASE)
+# Oxirida 1 yoki 2 xonali kasr: "35000.00", "12,5" (minglik ajratuvchidan keyin doim 3 ta raqam keladi)
+_DECIMAL_TAIL = re.compile(r"[.,]\d{1,2}$")
 _HOURS = re.compile(r"^\s*(\d{1,2})(?:[:.](\d{2}))?\s*[-–—]\s*(\d{1,2})(?:[:.](\d{2}))?\s*$")
 
 
 def parse_amount(raw: str) -> int:
     """ "35 000", "35.000 so'm", "35000" -> 35000. Noto'g'ri bo'lsa ValueError."""
-    cleaned = _AMOUNT_NOISE.sub("", raw or "")
-    if not cleaned.isdigit():
+    text = (raw or "").strip()
+    # "35000.00" yoki "12,5": nuqta va vergul minglik ajratuvchi deb olib tashlansa, summa 100 baravar
+    # oshib ketar edi. So'mda tiyin yo'q, shuning uchun bunday yozuv rad etiladi
+    if _DECIMAL_TAIL.search(_UNIT.sub("", text).strip()):
+        raise ValueError("Summani tiyinsiz, butun son bilan yozing, masalan: 35000")
+    cleaned = _AMOUNT_NOISE.sub("", text)
+    if not cleaned.isascii() or not cleaned.isdecimal():
         raise ValueError("Summani faqat raqam bilan yozing, masalan: 35000")
     amount = int(cleaned)
     if amount > MAX_AMOUNT:
@@ -27,7 +35,8 @@ def parse_km(raw: str) -> float:
         value = float(cleaned)
     except ValueError:
         raise ValueError("Masofani kilometrda yozing, masalan: 5 yoki 3.5") from None
-    if value < 0 or value > 200:
+    # `not (0 <= value <= 200)`: "nan" ham shu yerda ushlanadi (u hech narsa bilan taqqoslanmaydi)
+    if not (0 <= value <= 200):
         raise ValueError("Masofa 0 dan 200 km gacha bo'lishi kerak")
     return value
 
@@ -53,7 +62,7 @@ def parse_discount(raw: str) -> tuple[str, int, int | None]:
     text = (raw or "").strip()
     if "%" in text:
         left, right = text.split("%", 1)
-        if not left.strip().isdigit():
+        if not (left.strip().isascii() and left.strip().isdecimal()):
             raise ValueError("Foizni shunday yozing: 15% yoki 15% 30000")
         percent = int(left.strip())
         if not 1 <= percent <= 100:
@@ -72,6 +81,6 @@ def parse_discount(raw: str) -> tuple[str, int, int | None]:
 def parse_count(raw: str, maximum: int, example: str) -> int:
     """Butun son: "0", "100". Noto'g'ri bo'lsa ValueError."""
     cleaned = re.sub(r"[\s_]", "", raw or "")
-    if not cleaned.isdigit() or int(cleaned) > maximum:
+    if not (cleaned.isascii() and cleaned.isdecimal()) or int(cleaned) > maximum:
         raise ValueError(f"Faqat son yozing, masalan: {example}")
     return int(cleaned)

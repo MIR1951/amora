@@ -18,12 +18,16 @@ class RecordingNotifier:
     def __init__(self):
         self.created: list[int] = []
         self.cancelled: list[int] = []
+        self.signed_in_ids: list[int] = []
 
     async def order_created(self, order_id: int) -> None:
         self.created.append(order_id)
 
     async def order_cancelled(self, order_id: int) -> None:
         self.cancelled.append(order_id)
+
+    async def signed_in(self, telegram_user_id: int) -> None:
+        self.signed_in_ids.append(telegram_user_id)
 
 
 @pytest.fixture
@@ -34,6 +38,8 @@ def cfg(tmp_path) -> Settings:
         public_base_url="https://api.test",
         media_dir=tmp_path / "media",
         max_active_orders=2,
+        max_orders_per_hour=0,
+        allow_legacy_register=True,
         register_limit_per_hour=1000,
         verify_limit_per_hour=1000,
         bot_username="amora_test_bot",
@@ -189,6 +195,13 @@ async def api(bot, bot_cfg, engine, session_factory):
     from tests.telegram_fakes import GROUP_ID
 
     notifier = TelegramNotifier(bot, GROUP_ID, session_factory, bot_cfg.timezone)
+
+    async def quiet_sign_in(telegram_user_id: int) -> None:
+        # "Hisobingizga kirildi" xabari bu testlarda guruhdagi xabarlar hisobini buzmasin;
+        # uning o'zi test_audit_fixes.py da tekshiriladi
+        return None
+
+    notifier.signed_in = quiet_sign_in
     app = create_app(bot_cfg, engine=engine, notifier=notifier)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test/api/v1") as client:

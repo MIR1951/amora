@@ -391,9 +391,12 @@ async def test_quote_uses_known_phone_before_registration(client, seed, session_
     await add_promo(session_factory, is_auto=True, value=15)
     auth = await register(client, phone="90 123 45 67")
     assert (await order(client, seed, auth)).status_code == 201
-    # Ilova qayta o'rnatilgan: token yo'q, lekin telefon ma'lum
+    # Token bo'lmasa telefon hisobga olinmaydi: begona raqam buyurtma berganmi, bilib bo'lmaydi.
+    # Chegirma buyurtma paytida tasdiqlangan raqam bo'yicha qayta tekshiriladi
     again = await quote(client, seed, apply_auto_promo=True, phone="+998 90 123 45 67")
-    assert again["discount"] == 0
+    assert again["discount"] == 15_000
+    known = await quote(client, seed, headers=auth, apply_auto_promo=True)
+    assert known["discount"] == 0
     stranger = await quote(client, seed, apply_auto_promo=True, phone="90 000 00 00")
     assert stranger["discount"] == 15_000
     junk = await quote(client, seed, apply_auto_promo=True, phone="abc")
