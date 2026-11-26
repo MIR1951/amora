@@ -9,6 +9,7 @@
    avval tasdiqlanmasdan ochilgan hisoblarning buyurtmalari ham unga o'tadi.
 """
 
+import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
@@ -65,14 +66,50 @@ def _aware(value):
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+# Do'kon tekshiruvchisining sinov hisobi: haqiqiy bo'lmagan raqam va Telegram'da uchramaydigan
+# (manfiy) hisob raqami. Bu raqamni Telegram orqali tasdiqlab bo'lmaydi
+REVIEW_PHONE = "+998000000000"
+REVIEW_TELEGRAM_ID = -1
+REVIEW_NAME = "Sinov (do'kon tekshiruvchisi)"
+REVIEW_CODE_MIN_LENGTH = 12
+
+
+def is_review_code(name: str | None, review_code: str) -> bool:
+    """Ism maydoniga sinov kodi yozilganmi. Kod sozlanmagan yoki juda qisqa bo'lsa, hech qachon."""
+    code = review_code.strip()
+    if len(code) < REVIEW_CODE_MIN_LENGTH or not name:
+        return False
+    return hmac.compare_digest(name.strip().encode(), code.encode())
+
+
 async def start(
     session: AsyncSession,
     name: str | None,
     platform: str | None,
     device: CustomerDevice | None,
+    review_code: str = "",
 ) -> str:
-    """Yangi so'rov. Kodni qaytaradi: u faqat ilovada va bot havolasida bo'ladi."""
+    """Yangi so'rov. Kodni qaytaradi: u faqat ilovada va bot havolasida bo'ladi.
+
+    Ism o'rniga sinov kodi (`review_code`) yozilgan bo'lsa, so'rov darhol sinov hisobi uchun
+    tasdiqlangan bo'ladi: do'kon tekshiruvchisi Telegram'siz kira oladi."""
     code = secrets.token_urlsafe(16)
+    if is_review_code(name, review_code):
+        session.add(
+            PhoneVerification(
+                code_hash=hash_token(code),
+                device_id=device.id if device is not None else None,
+                name=REVIEW_NAME,
+                platform=platform,
+                phone=REVIEW_PHONE,
+                telegram_user_id=REVIEW_TELEGRAM_ID,
+                telegram_name=REVIEW_NAME,
+                status=VerificationStatus.CONFIRMED.value,
+                expires_at=utcnow() + CONFIRMED_TTL,
+            )
+        )
+        await session.commit()
+        return code
     session.add(
         PhoneVerification(
             code_hash=hash_token(code),

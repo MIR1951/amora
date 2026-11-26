@@ -61,13 +61,22 @@ jobs:
       - name: Testlar va APK
         run: >
           ./gradlew --no-daemon --stacktrace
-          testReleaseUnitTest assembleRelease assembleDebug
+          testReleaseUnitTest assembleRelease bundleRelease assembleDebug
           -Pamora.versionCode=${{ github.run_number }}
           -Pamora.debugApiBaseUrl=http://10.0.2.2:8000
       - name: APK fayllarni nomlash
         run: |
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/amora-${{ github.run_number }}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/amora-sinov-${{ github.run_number }}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/amora-${{ github.run_number }}.aab"
+      # Google Play'ga yuklanadigan fayl (.aab). Faqat maxfiy kalit bilan imzolangani (main shoxi,
+      # sirlar qo'yilgan) do'konga yaraydi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amora-aab
+          path: ${{ runner.temp }}/amora-${{ github.run_number }}.aab
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: amora-apk
@@ -189,6 +198,7 @@ jobs:
         run: |
           mkdir publish
           cp artifacts/amora-apk/*.apk publish/amora.apk
+          cp artifacts/amora-aab/*.aab publish/amora.aab
           if [ -d artifacts/smoke-screenshots ]; then
             cp -r artifacts/smoke-screenshots publish/screenshots
           fi

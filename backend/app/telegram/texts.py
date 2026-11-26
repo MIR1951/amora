@@ -9,6 +9,7 @@ from app.services import promos
 from app.services.orders import CUSTOMER_ACTOR
 from app.services.reports import Report
 from app.services.shop import format_sum
+from app.services.verify import REVIEW_TELEGRAM_ID
 
 def escape(value: str) -> str:
     """Telegram HTML uchun faqat <, > va & almashtiriladi. Tutuq belgisi (o', g') o'z holicha qoladi."""
@@ -91,6 +92,8 @@ def order_text(order: Order, tz_name: str) -> str:
 def _order_text(order: Order, tz_name: str, name_limit: int, note_limit: int) -> str:
     status = order.status_enum
     lines = [f"{STATUS_EMOJI[status]} <b>№{order.id} · {STATUS_TITLE[status]}</b>", ""]
+    if order.customer_telegram_id == REVIEW_TELEGRAM_ID:
+        lines[1:1] = ["🧪 <b>SINOV BUYURTMA</b> (do'kon tekshiruvchisi): tayyorlamang va yetkazmang"]
 
     for item in order.items:
         name = escape(_shorten(item.name, name_limit))
@@ -111,7 +114,7 @@ def _order_text(order: Order, tz_name: str, name_limit: int, note_limit: int) ->
         customer += f" · {order.customer_order_no}-buyurtmasi"
     lines.append(customer)
     phone_line = f"📞 {escape(order.phone)}"
-    if order.customer_telegram_id:
+    if (order.customer_telegram_id or 0) > 0:
         # Raqam o'chiq bo'lsa ham kuryer mijozga Telegram'da yoza yoki qo'ng'iroq qila oladi
         phone_line += f" · {telegram_link(order.customer_telegram_id, 'Telegram')}"
     lines.append(phone_line)

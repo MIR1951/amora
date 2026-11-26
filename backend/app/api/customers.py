@@ -97,7 +97,7 @@ async def resolve_bot_username(request: Request) -> str | None:
     summary="Raqamni Telegram orqali tasdiqlashni boshlash",
 )
 async def telegram_start(
-    data: TelegramStartIn, request: Request, session: SessionDep, device: OptionalDeviceDep
+    data: TelegramStartIn, request: Request, session: SessionDep, device: OptionalDeviceDep, cfg: CfgDep
 ) -> TelegramStartOut:
     """Ilova `app_url` (yoki Telegram o'rnatilmagan bo'lsa `bot_url`) havolasini ochadi. Mijoz
     botda "Start" va "📱 Raqamni yuborish" ni bosadi. Ilova shu orada `/auth/telegram/check` ni
@@ -110,7 +110,7 @@ async def telegram_start(
         raise ApiError(
             503, "verify_unavailable", "Tasdiqlash hozir ishlamayapti. Birozdan keyin qayta urinib ko'ring"
         )
-    code = await verify.start(session, data.name, data.platform, device)
+    code = await verify.start(session, data.name, data.platform, device, cfg.review_code)
     start = f"{verify.START_PREFIX}{code}"
     return TelegramStartOut(
         code=code,
@@ -136,7 +136,8 @@ async def telegram_check(
         raise ApiError(410, "verification_expired", "Tasdiqlash muddati o'tdi. Qaytadan urinib ko'ring")
     if result.status == verify.CheckStatus.PENDING:
         return TelegramCheckOut(status="pending")
-    if result.fresh and result.customer.telegram_user_id is not None:
+    # Sinov hisobining (do'kon tekshiruvchisi) Telegram'i yo'q: unga xabar yuborilmaydi
+    if result.fresh and (result.customer.telegram_user_id or 0) > 0:
         # Havolani begona odam yuborgan bo'lsa, hisob egasi bilib qoladi va botdagi tugma bilan
         # barcha telefonlarni hisobdan chiqara oladi
         background.add_task(safe_notify, notifier.signed_in(result.customer.telegram_user_id))
