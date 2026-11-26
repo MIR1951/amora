@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Bitta mijoz soatiga ko'pi bilan nechta buyurtma bera oladi (bekor qilinganlari ham). 0 = cheklovsiz
     max_orders_per_hour: int = 8
     register_limit_per_hour: int = 10
+    # Do'kon (App Store / Google Play) tekshiruvchisi uchun sinov kodi. Tekshiruvchi uni "Ism"
+    # maydoniga yozib, tasdiqlashni bosadi: Telegram'siz sinov hisobiga kiradi. Bo'sh = o'chiq.
+    # Kamida 12 belgi bo'lsin; tekshiruv tugagach o'chirib qo'ying. Sinov buyurtmalari guruhga
+    # "SINOV BUYURTMA" belgisi bilan tushadi
+    review_code: str = ""
     # Bitta IP manzildan soatiga nechta tasdiqlash so'rovi (mobil internetda ko'p odam bitta IP'da)
     verify_limit_per_hour: int = 30
 

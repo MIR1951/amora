@@ -238,6 +238,13 @@ GitHub'da *Settings → Secrets and variables → Actions* ga to'rtta sir qo'shi
 
 Eslatma: kalit almashgach, sinov kaliti bilan o'rnatilgan eski ilova ustidan yangisi o'rnatilmaydi. Uni bir marta o'chirib, qayta o'rnatish kerak (mijoz raqamini qayta tasdiqlaydi, buyurtmalar tarixi saqlanadi).
 
+## Do'konlarga chiqarish
+
+- **Ochiq sahifalar.** Server `/privacy` (maxfiylik siyosati) va `/delete-account` (hisobni o'chirish yo'riqnomasi) sahifalarini o'zbek va ingliz tilida beradi. Ikkala do'kon ham shu havolalarni so'raydi. Matni `backend/app/pages.py` da.
+- **Tekshiruvchi uchun kirish.** Ilovaga faqat Telegram orqali kiriladi, do'kon tekshiruvchisida esa bunday imkon yo'q. `.env` ga `AMORA_REVIEW_CODE=<kamida 12 belgili kod>` yozilsa, shu kodni ilovadagi "Ism" maydoniga yozib "Telegram orqali tasdiqlash" bosilganda Telegram'siz sinov hisobiga kiriladi (ilova Telegram'ni ochadi, ortga qaytilsa kirgan bo'ladi). Sinov buyurtmalari guruhga "SINOV BUYURTMA" belgisi bilan tushadi: ularni tayyorlamang. Tekshiruv tugagach kodni o'chirib, `docker compose up -d` qiling.
+- **Google Play.** CI `main` shoxidan `.aab` fayl yig'adi ("Artifacts" → `amora-aab`, `ci-artifacts` shoxida `amora.aab`). Do'konga faqat maxfiy kalit bilan imzolangani yuklanadi (yuqoridagi "Imzo").
+- **App Store.** Actions → "iOS TestFlight" → Run workflow (`main` shoxidan).
+
 ## Papkalar
 
 ```

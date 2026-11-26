@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app import pages
 from app.api import customers, events, menu, orders
 from app.api.deps import SessionDep
 from app.config import Settings, get_settings
@@ -97,6 +98,7 @@ def create_app(
     api.include_router(orders.router)
     api.include_router(events.router)
     app.include_router(api)
+    app.include_router(pages.router)
 
     cfg.media_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=cfg.media_dir), name="media")
