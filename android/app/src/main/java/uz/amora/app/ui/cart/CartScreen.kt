@@ -44,9 +44,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
@@ -155,10 +157,17 @@ fun CartScreen(
     val ime = WindowInsets.ime
     val density = LocalDensity.current
     val keyboardOpen by remember(ime, density) { derivedStateOf { ime.getBottom(density) > 0 } }
-    val docked = active && !keyboardOpen
+    // Faqat shu ekrandagi maydonga yozilayotganda: boshqa ekrandan (masalan, profildagi ism
+    // maydonidan) ochiq qolgan klaviatura tugmani yashirmaydi va o'zi yopiladi
+    var fieldFocused by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(keyboardOpen, fieldFocused) {
+        if (keyboardOpen && !fieldFocused) keyboard?.hide()
+    }
+    val docked = active && !(keyboardOpen && fieldFocused)
 
     Scaffold(
-        modifier = Modifier.imePadding(),
+        modifier = Modifier.imePadding().onFocusChanged { fieldFocused = it.hasFocus },
         containerColor = scheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
